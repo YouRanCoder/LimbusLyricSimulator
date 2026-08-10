@@ -326,13 +326,16 @@ class ControlPanel(QWidget):
                 self.stroke_btn.setStyleSheet(f"background-color:{self.current_stroke_color.name()};")
                 self.glow_color_btn.setStyleSheet(f"background-color:{self.current_glow_color.name()};")
             except: pass
+        logger.debug(self.player_combo.currentText())
         self.smtc = SMTCWatcher(
-            self.song_changed
+            player_name=self.player_combo.currentText(),
+            callback=self.song_changed
         )
         # 必须等主事件循环运行后再初始化 SMTC，
         # 用 asyncio.run() 会创建一次性临时循环，事件监听会立即失效
         QTimer.singleShot(0, self.smtc.start)
     def song_changed(self, song, artist):
+        self.smtc.player_name = self.player_combo.currentText()
         self.fetch_lyric()
         #我将在以后的版本中优化这里
         self.stop();self.start()

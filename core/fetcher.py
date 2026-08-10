@@ -8,8 +8,11 @@ from winrt.windows.media.control import (GlobalSystemMediaTransportControlsSessi
 )
 import asyncio
 import logging
+from config import settings
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 #旧版的通过窗口标题获取歌曲信息的方式，仍然保留以兼容部分播放器
 class LyricFetcher:
     @staticmethod
@@ -99,7 +102,8 @@ class LyricFetcher:
 
 
 class SMTCWatcher:
-    def __init__(self, callback=None):
+    def __init__(self, player_name, callback=None):
+        self.player_name = player_name
         self.callback = callback
         self.session = None
         self.manager = None
@@ -134,15 +138,18 @@ class SMTCWatcher:
         )
         self.session = (
             self.manager
-            .get_current_session()
+            .get_sessions()
+        )
+        self.session = next(
+            (s for s in self.session if s.source_app_user_model_id == settings.DEFAULT_PLAYERS.get(self.player_name, {}).get("process", "")),
+            None
         )
         if not self.session:
-            logger.warning("没有SMTC播放器")
-            return
+                    logger.warning("没有SMTC播放器")
+                    return
         # 注册歌曲变化事件
-        self.session.add_media_properties_changed(
-            self.on_media_changed
-        )
+        if self.session is not None:
+            self.session.add_media_properties_changed(self.on_media_changed)
         # 立即获取一次，但不触发回调（避免程序刚启动就自动开始播放）
         await self.update_song(notify=False)
 
