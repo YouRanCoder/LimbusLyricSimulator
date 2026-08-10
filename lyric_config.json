@@ -1,0 +1,114 @@
+{
+  "settings": {
+    "text_color": "#ffea00",
+    "stroke_color": "#705109",
+    "glow_color": "#ffea00",
+    "glow_enabled": true,
+    "glow_size": 13,
+    "glow_alpha": 25,
+    "loop": true,
+    "trans_only": false,
+    "mode": "chinese",
+    "font_family": "宋体",
+    "font_size": 30,
+    "stroke_width": 0.6,
+    "spacing": 4.0,
+    "shake_intensity": 2,
+    "shake_speed": 143,
+    "fade_speed": 6,
+    "rise_speed": 1,
+    "margin_time": 2000,
+    "max_interval": 10000,
+    "max_duration": 4000,
+    "angle_min": -10,
+    "angle_max": 10,
+    "player": "网易云音乐",
+    "source": "网易云",
+    "delay": 0,
+    "perspective_enabled": true,
+    "persp_x_strength": 39,
+    "persp_y_strength": 0,
+    "persp_compensation": 100
+  },
+  "presets": {
+    "通用": {
+      "text": "#fffeef",
+      "stroke": "#d8a523",
+      "glow": "#d8a523"
+    },
+    "殷红": {
+      "text": "#ff0015",
+      "stroke": "#9d0a0a",
+      "glow": "#ff0008"
+    },
+    "噤默": {
+      "text": "#ffffff",
+      "stroke": "#000000",
+      "glow": "#000000"
+    },
+    "首脑": {
+      "text": "#000000",
+      "stroke": "#ffd501",
+      "glow": "#ffb507"
+    },
+    "指令": {
+      "text": "#00ffff",
+      "stroke": "#007ac6",
+      "glow": "#00aaff"
+    },
+    "怪盗": {
+      "text": "#000000",
+      "stroke": "#e10000",
+      "glow": "#ff0000"
+    },
+    "电视机": {
+      "text": "#ffff00",
+      "stroke": "#000000",
+      "glow": "#ffff00"
+    },
+    "月亮": {
+      "text": "#00b3ff",
+      "stroke": "#066378",
+      "glow": "#00ffe1"
+    },
+    "英雄": {
+      "text": "#ffea00",
+      "stroke": "#705109",
+      "glow": "#ffea00"
+    },
+    "宝玉": {
+      "text": "#27fff1",
+      "stroke": "#008a8a",
+      "glow": "#00ffff"
+    },
+    "心碎": {
+      "text": "#b223cb",
+      "stroke": "#591267",
+      "glow": "#b223cb"
+    },
+    "司田": {
+      "text": "#fcffef",
+      "stroke": "#ffc61c",
+      "glow": "#f1ff6e"
+    },
+    "巴迪(??": {
+      "text": "#00ff00",
+      "stroke": "#004722",
+      "glow": "#00ff00"
+    }
+  },
+  "players": {
+    "网易云音乐": {
+      "process": "cloudmusic.exe",
+      "pattern": "^(.+)\\s*-\\s*(.+?)$"
+    },
+    "酷狗音乐": {
+      "process": "kgmusic.exe",
+      "pattern": "^(.+)\\s*-\\s*(.+?)$"
+    },
+    "QQ音乐": {
+      "process": "qqmusic.exe",
+      "pattern": "^(.+)\\s*-\\s*(.+?)\\s*-\\s*QQ音乐$"
+    }
+  }
+}
