@@ -1,8 +1,9 @@
 [project]
 name = "lyrics-show"
 version = "0.1.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
+    "netease-cloudmusic-detector>=1.0.0",
     "pyqt5==5.15.10",
     "pyqt5-qt5==5.15.2",
     "pywin32>=312",
