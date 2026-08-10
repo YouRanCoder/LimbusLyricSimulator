@@ -1,5 +1,3 @@
-from venv import logger
-
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QSlider, QColorDialog, QSpinBox,
@@ -10,8 +8,8 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QFont
 from config.manage import load_all_config, save_all_config, DEFAULT_PLAYERS
 from ui.lyric_window import LyricWindow
-from core.fetcher import LyricFetcher, LyricSearchEngine
-from core.fetcher import SMTCWatcher
+from core.fetcher import create_fetcher
+from core.search_engine import LyricSearchEngine
 import asyncio
 import logging
 
@@ -326,19 +324,34 @@ class ControlPanel(QWidget):
                 self.stroke_btn.setStyleSheet(f"background-color:{self.current_stroke_color.name()};")
                 self.glow_color_btn.setStyleSheet(f"background-color:{self.current_glow_color.name()};")
             except: pass
-        logger.debug(self.player_combo.currentText())
-        self.smtc = SMTCWatcher(
+        # 通过工厂创建当前播放器对应的 Fetcher（UI 不关心具体实现）
+        self.fetcher = create_fetcher(
             player_name=self.player_combo.currentText(),
-            callback=self.song_changed
+            callback=self.song_changed,
+            players=self.players,
         )
-        # 必须等主事件循环运行后再初始化 SMTC，
+        # 播放器下拉框变化时切换 Fetcher
+        self.player_combo.currentTextChanged.connect(self.on_player_changed)
+        # 必须等主事件循环运行后再启动监听，
         # 用 asyncio.run() 会创建一次性临时循环，事件监听会立即失效
-        QTimer.singleShot(0, self.smtc.start)
+        QTimer.singleShot(0, self.fetcher.start)
     def song_changed(self, song, artist):
-        self.smtc.player_name = self.player_combo.currentText()
         self.fetch_lyric()
-        #我将在以后的版本中优化这里
-        self.stop();self.start()
+        # TODO: 后续接入播放进度同步，避免切歌后整首重播
+        self.stop()
+        self.start()
+    def on_player_changed(self, player_name):
+        """切换播放器时重建 Fetcher。"""
+        if not hasattr(self, "fetcher"):
+            return
+        self.fetcher.stop()
+        self.fetcher = create_fetcher(
+            player_name=player_name,
+            callback=self.song_changed,
+            players=self.players,
+        )
+        QTimer.singleShot(0, self.fetcher.start)
+        self.status.setText(f"状态：已切换到播放器 {player_name}")
     def refresh_player_list(self):
         self.player_combo.blockSignals(True); self.player_combo.clear()
         self.player_combo.addItems(list(self.players.keys()))
@@ -378,10 +391,9 @@ class ControlPanel(QWidget):
         """
         self.status.setText("状态：正在获取当前播放...")
         QApplication.processEvents()
-        song = None
-        artist = None
-        song, artist = self.smtc.get_current_media() or (None, None)
-        if not song:
+        info = self.fetcher.get_current_media()
+        song, artist = info.song, info.artist
+        if not info.has_track:
             text, ok = QInputDialog.getText(
                 self,
                 "手动输入",
@@ -407,7 +419,8 @@ class ControlPanel(QWidget):
         lyric, duration = LyricSearchEngine.search(song, artist, source, trans_only)
         if lyric:
             self.text_input.setPlainText(lyric)
-            self.lyric_window.song_duration = duration
+            # 优先使用播放器上报的真实时长（秒），否则用搜索接口返回的时长
+            self.lyric_window.song_duration = info.duration_ms if info.duration > 0 else duration
             self.status.setText(f"状态：已获取「{song}」的歌词")
         else:
             self.status.setText("状态：未找到歌词，请尝试换源")
@@ -491,6 +504,40 @@ class ControlPanel(QWidget):
         self.status.setText(f"状态：正在播放... 模式：{mode}")
 
     def stop(self): self.lyric_window.stop_lyric(); self.status.setText("状态：已停止")
+    def _collect_settings(self):
+        """从 UI 控件提取设置字典，供配置保存使用。"""
+        return {
+            'text_color': self.current_color.name(),
+            'stroke_color': self.current_stroke_color.name(),
+            'glow_color': self.current_glow_color.name(),
+            'glow_enabled': self.glow_check.isChecked(),
+            'glow_size': self.glow_size_slider.value(),
+            'glow_alpha': self.glow_alpha_slider.value(),
+            'loop': self.loop_check.isChecked(),
+            'trans_only': self.trans_check.isChecked(),
+            'mode': self.mode_combo.currentData(),
+            'font_family': self.font_combo.currentFont().family(),
+            'font_size': self.font_size.value(),
+            'stroke_width': self.stroke_spin.value(),
+            'spacing': self.spacing_spin.value(),
+            'shake_intensity': self.shake_intensity_slider.value(),
+            'shake_speed': self.shake_speed_slider.value(),
+            'fade_speed': self.fade_speed_slider.value(),
+            'rise_speed': self.rise_speed_slider.value(),
+            'margin_time': self.margin_spin.value(),
+            'max_interval': self.max_interval_spin.value(),
+            'max_duration': self.max_duration_spin.value(),
+            'angle_min': self.angle_min.value(),
+            'angle_max': self.angle_max.value(),
+            'player': self.player_combo.currentText(),
+            'source': self.source_combo.currentText(),
+            'delay': self.delay_combo.currentIndex(),
+            'perspective_enabled': self.perspective_check.isChecked(),
+            'persp_x_strength': self.persp_x_slider.value(),
+            'persp_y_strength': self.persp_y_slider.value(),
+            'persp_compensation': self.persp_comp_slider.value(),
+        }
+
     def closeEvent(self, event):
-        save_all_config(self, self.presets, self.players)
+        save_all_config(self._collect_settings(), self.presets, self.players)
         self.lyric_window.close(); event.accept()
