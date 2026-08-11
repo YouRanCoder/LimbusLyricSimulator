@@ -643,6 +643,11 @@ class ControlPanel(QWidget):
     
     def _on_auto_play(self) -> None:
         """切歌后自动重新播放"""
+        logger.debug("自动播放触发，重新开始")
+        source = self.source_combo.currentText()
+        trans_only = self.trans_check.isChecked()
+        #ToDo:这里以后也应该是一个弹窗的
+        self.controller.fetch_lyric(source, trans_only,{lambda: logger.error("自动播放时未能获取歌曲信息")})
         self._on_stop()
         self._on_start()
     

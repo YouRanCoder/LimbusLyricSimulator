@@ -4,8 +4,8 @@
     "stroke_color": "#705109",
     "glow_color": "#ffea00",
     "glow_enabled": true,
-    "glow_size": 13,
-    "glow_alpha": 25,
+    "glow_size": 7,
+    "glow_alpha": 27,
     "loop": true,
     "trans_only": false,
     "mode": "chinese",
@@ -28,7 +28,7 @@
     "perspective_enabled": true,
     "persp_x_strength": 39,
     "persp_y_strength": 0,
-    "persp_compensation": 100
+    "persp_compensation": 75
   },
   "presets": {
     "通用": {
