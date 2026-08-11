@@ -1,156 +1,158 @@
-from PyQt5.QtWidgets import QApplication, QInputDialog
-from .search_engine import LyricSearchEngine
-from config.settings import DEFAULT_PLAYERS
-import subprocess, re, win32gui, win32process
-import asyncio
-from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
-from winrt.windows.media.control import (GlobalSystemMediaTransportControlsSessionManager
-)
 import asyncio
 import logging
-from config import settings
+import threading
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+from cloudmusic_detector import CloudMusic
+from winrt.windows.media.control import (
+    GlobalSystemMediaTransportControlsSessionManager,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-#旧版的通过窗口标题获取歌曲信息的方式，仍然保留以兼容部分播放器
-class LyricFetcher:
-    @staticmethod
-    def get_player_pid(player_name=None, players=None):
-        if players is None:
-            players = DEFAULT_PLAYERS
-        if player_name and player_name in players:
-            proc_name = players[player_name]["process"]
-        else:
-            return None
-        try:
-            result = subprocess.run(
-                ['tasklist', '/fi', f'imagename eq {proc_name}', '/fo', 'csv', '/nh'],
-                capture_output=True, text=True
-            )
-            for line in result.stdout.strip().split('\n'):
-                if proc_name in line.lower():
-                    pid = line.split(',')[1].strip('"')
-                    return int(pid)
-        except:
-            pass
-        return None
-    @staticmethod
-    def get_song_from_title(pid, player_name=None, players=None):
-        if players is None:
-            players = DEFAULT_PLAYERS
-        pattern_str = r'^(.+?)\s*-\s*(.+)$'
-        if player_name and player_name in players:
-            pattern_str = players[player_name].get("pattern", pattern_str)
-        pattern = re.compile(pattern_str)
-        result = []
-        def callback(hwnd, _):
-            _, window_pid = win32process.GetWindowThreadProcessId(hwnd)
-            if window_pid == pid and win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd)
-                if title and ' - ' in title and len(title) < 150:
-                    result.append(title)
-        win32gui.EnumWindows(callback, None)
-        for title in result:
-            match = pattern.match(title)
-            if match:
-                groups = match.groups()
-                if len(groups) >= 2:
-                    return groups[0].strip(), groups[1].strip()
-                elif len(groups) == 1:
-                    return groups[0].strip(), ""
-        return None, None
 
-    @staticmethod
-    def fetch_and_set(panel):
-        panel.status.setText("状态：正在获取当前播放...")
-        QApplication.processEvents()
-        player_name = panel.player_combo.currentText()
-        players = panel.players
-        pid = LyricFetcher.get_player_pid(player_name, players)
-        song = None
-        artist = None
-        if pid:
-            song, artist = LyricFetcher.get_song_from_title(pid, player_name, players)
-        if not song:
-            text, ok = QInputDialog.getText(
-                panel, "手动输入",
-                "未能自动获取歌曲信息\n请输入 歌名 - 歌手：",
-                text="歌名 - 歌手"
-            )
-            if ok and text.strip():
-                parts = text.strip().split(' - ', 1)
-                if len(parts) == 2:
-                    song, artist = parts[0].strip(), parts[1].strip()
-                else:
-                    song = parts[0].strip()
-                    artist = ""
-            else:
-                panel.status.setText("状态：已取消")
-                return
-        source = panel.source_combo.currentText()
-        trans_only = panel.trans_check.isChecked()
-        panel.status.setText(f"状态：从{source}搜索「{song}」...")
-        QApplication.processEvents()
-        lyric, duration = LyricSearchEngine.search(song, artist, source, trans_only)
-        if lyric:
-            panel.text_input.setPlainText(lyric)
-            panel.lyric_window.song_duration = duration
-            panel.status.setText(f"状态：已获取「{song}」的歌词 ")
-        else:
-            panel.status.setText("状态：未找到歌词，请尝试换源")
+@dataclass(frozen=True)
+class MediaInfo:
+    """媒体状态快照。duration / position 单位均为秒。"""
+
+    song: str = ""
+    artist: str = ""
+    duration: float = 0.0
+    position: float = 0.0
+    is_playing: bool = False
+
+    @property
+    def has_track(self) -> bool:
+        return bool(self.song)
+
+    @property
+    def duration_ms(self) -> int:
+        return int(self.duration * 1000)
+
+    @property
+    def position_ms(self) -> int:
+        return int(self.position * 1000)
 
 
-class SMTCWatcher:
-    def __init__(self, player_name, callback=None):
+class Fetcher(ABC):
+    CAP_PROGRESS = "progress"  # 可查询播放进度
+    CAP_EVENT = "event"  # 可推送切歌事件
+    CAP_POLL = "poll"  # 可轮询获取当前媒体状态
+    def __init__(self, player_name, callback=None, players=None):
         self.player_name = player_name
         self.callback = callback
-        self.session = None
-        self.manager = None
-        self._loop = None
+        self.players = players or {}  # 播放器配置（进程名等），由外部注入
+        self.capabilities = set()
         self._current_song = None
         self._current_artist = None
-
+        self._loop = self._get_main_loop()
+    # ---- 生命周期（子类必须实现） ----
+    @abstractmethod
     def start(self):
-        """在当前运行的事件循环中启动 SMTC 监听。
-
-        必须在事件循环启动之后调用（例如 QTimer.singleShot(0, ...)），
-        不能使用 asyncio.run()，否则临时循环一关闭，事件监听就失效了。
-        """
-        loop = asyncio.get_event_loop()
-        return loop.create_task(self.init())
-
+        """启动监听，必须非阻塞。"""
+    @abstractmethod
+    def stop(self):
+        """停止监听，释放资源。"""
+    # ---- 查询接口 ----
+    @abstractmethod
     def get_current_media(self):
-        """返回当前播放的歌曲和歌手，如果没有播放则返回(None, None)"""
-        return self._current_song, self._current_artist
+        """返回当前媒体快照 MediaInfo；无播放时返回空 MediaInfo。"""
+    def get_progress(self):
+        """返回当前播放进度（秒）；不支持时返回 None。"""
+        return None
+    def get_duration(self):
+        """返回总时长（秒）；不支持时返回 None。"""
+        return None
+    def supports(self, capability):
+        return capability in self.capabilities
+    # ---- 内部工具 ----
+    def notify_song_changed(self, song, artist):
+        """调用回调通知歌曲变化。"""
+        if self.callback:
+            self.callback(song, artist)
+    def _set_current(self, song, artist, notify=True):
+        """记录当前歌曲；与上次不同时通知回调。返回是否发生变化。"""
+        if song == self._current_song and artist == self._current_artist:
+            return False
+        self._current_song = song
+        self._current_artist = artist
+        logger.debug("歌曲变化: %s - %s", song, artist)
+        if notify:
+            self.notify_song_changed(song, artist)
+        return True
+    @staticmethod
+    def _get_main_loop():
+        try:
+            return asyncio.get_event_loop()
+        except RuntimeError:
+            return None
+    def _call_on_main(self, fn, *args):
+        """把回调安全切回主事件循环线程执行（供后台线程调用）。"""
+        if self._loop is None or self._loop.is_closed():
+            return
+        try:
+            self._loop.call_soon_threadsafe(fn, *args)
+        except RuntimeError:
+            pass
 
-    def get_current_song(self):
-        return self._current_song
 
-    def get_current_artist(self):
-        return self._current_artist
+class FetcherBySMTC(Fetcher):
+    """基于 Windows SMTC 的通用播放器获取器（事件驱动）。
+    通过系统媒体传输控件监听指定进程的切歌事件，不提供进度查询。
+    """
 
+    def __init__(self, player_name, callback=None, players=None):
+        super().__init__(player_name, callback, players)
+        self.capabilities = {self.CAP_EVENT}
+        self.session = None
+        self.manager = None
+        self._task = None
+
+    # ---- 生命周期 ----
+    def start(self):
+        """启动 SMTC 监听（需在主事件循环中调用，非阻塞）。"""
+        if self._task is not None and not self._task.done():
+            return
+        self._task = asyncio.get_event_loop().create_task(self.init())
+
+    def stop(self):
+        """停止 SMTC 监听。"""
+        if self.session is not None:
+            try:
+                self.session.remove_media_properties_changed(
+                    self.on_media_changed
+                )
+            except Exception:
+                pass
+        self.session = None
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+
+    # ---- 查询接口 ----
+    def get_current_media(self):
+        if not self._current_song:
+            return MediaInfo()
+        return MediaInfo(song=self._current_song, artist=self._current_artist)
+
+    # ---- 内部实现 ----
     async def init(self):
-        self._loop = asyncio.get_running_loop()
         self.manager = (
             await GlobalSystemMediaTransportControlsSessionManager
             .request_async()
         )
-        self.session = (
-            self.manager
-            .get_sessions()
-        )
+        process = self.players.get(self.player_name, {}).get("process", "")
         self.session = next(
-            (s for s in self.session if s.source_app_user_model_id == settings.DEFAULT_PLAYERS.get(self.player_name, {}).get("process", "")),
-            None
+            (s for s in self.manager.get_sessions()
+             if s.source_app_user_model_id == process),
+            None,
         )
-        if not self.session:
-                    logger.warning("没有SMTC播放器")
-                    return
-        # 注册歌曲变化事件
-        if self.session is not None:
-            self.session.add_media_properties_changed(self.on_media_changed)
-        # 立即获取一次，但不触发回调（避免程序刚启动就自动开始播放）
+        if self.session is None:
+            logger.warning("没有找到 SMTC 播放器: %s", self.player_name)
+            return
+        self.session.add_media_properties_changed(self.on_media_changed)
         await self.update_song(notify=False)
 
     def on_media_changed(self, sender, args):
@@ -164,39 +166,14 @@ class SMTCWatcher:
             pass
 
     async def update_song(self, notify=True):
-        if not self.session:
+        if self.session is None:
             return
-
-        # SMTC 事件触发时，媒体属性可能还没同步好，
-        # 此时读到的仍是旧歌曲。先读一次，若与当前相同则稍等重试。
-        info = await (
-            self.session
-            .try_get_media_properties_async()
-        )
-        song = info.title
-        artist = info.artist
+        info = await self.session.try_get_media_properties_async()
+        song, artist = info.title, info.artist
+        # 同曲连续两次读取一致时再确认一次，用于识别同一首歌重新播放
         if song == self._current_song and artist == self._current_artist:
             await asyncio.sleep(0.8)
-            info = await (
-                self.session
-                .try_get_media_properties_async()
-            )
-            song = info.title
-            artist = info.artist
+            info = await self.session.try_get_media_properties_async()
+            song, artist = info.title, info.artist
+        self._set_current(song, artist, notify=notify)
 
-        # 歌曲确实没变（重复事件），去重跳过
-        if song == self._current_song and artist == self._current_artist:
-            return
-
-        self._current_song = song
-        self._current_artist = artist
-        logger.debug(
-            "歌曲变化: %s - %s",
-            song,
-            artist
-        )
-        if self.callback and notify:
-            self.callback(
-                song,
-                artist
-            )
