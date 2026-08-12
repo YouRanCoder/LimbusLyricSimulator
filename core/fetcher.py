@@ -240,12 +240,10 @@ class FetcherBySMTC(Fetcher):
             [s.source_app_user_model_id for s in sessions],
         )
         process = self.players.get(self.player_name, {}).get("process", "")
-        # 进程名匹配（忽略大小写与 .exe 后缀差异，AUMID 格式各应用不一）
-        proc_key = process.lower().removesuffix(".exe")
         self.session: GlobalSystemMediaTransportControlsSession | None = next(
             (s for s in sessions
              if s.source_app_user_model_id
-             and proc_key in s.source_app_user_model_id.lower()),
+             and process.lower() in s.source_app_user_model_id.lower()),
             None,
         )
         # 兜底：按进程名匹配不到时，使用当前正在播放的会话

@@ -45,8 +45,130 @@ class LyricWindow(QMainWindow):
         self.pos_y_min = 5
         self.pos_y_max = 75
 
+    def _text_width(self, s):
+        """精确测量一行文本的渲染宽度
+
+        与 paintEvent 的渲染方式完全一致：逐字符累加 + 字符间距。
+        不能用整串 horizontalAdvance（含 kerning，比实际渲染窄），
+        否则会低估宽度导致折叠判断失误。
+        """
+        if not s:
+            return 0
+        fm = QFontMetrics(self.font)
+        total = sum(fm.horizontalAdvance(ch) for ch in s)
+        return total + max(0, len(s) - 1) * self.spacing
+
+    def _compute_place_constraints(self):
+        """计算文本放置相关的所有约束，供 wrap_text 和 place_randomly 共用
+
+        保证折叠后的行宽一定能被 place_randomly 放下，避免两处计算不一致。
+        """
+        sw = self.width()
+        sh = self.height()
+        fm = QFontMetrics(self.font)
+        text_height = fm.height()
+
+        # 发光/阴影额外扩展
+        glow_margin = (self.glow_size + 4) if self.glow else 4
+        shadow_margin = 6  # 中文模式阴影偏移
+
+        # 分辨率自适应基础边距（屏幕对角线的 3%，最小 30px）
+        diagonal = math.sqrt(sw * sw + sh * sh)
+        base_margin = max(30, int(diagonal * 0.03))
+
+        # 透视变换额外偏移
+        persp_extra_x = 0
+        persp_extra_y = 0
+        if self.perspective_enabled:
+            persp_extra_x = int(sw * max(abs(self.persp_x_strength), 0.001) * 2)
+            persp_extra_y = int(sh * max(abs(self.persp_y_strength), 0.001) * 2)
+
+        # 用户设置的起始位置范围（百分比 → 像素）
+        user_x_min = int(sw * self.pos_x_min / 100)
+        user_x_max = int(sw * self.pos_x_max / 100)
+        user_y_min = int(sh * self.pos_y_min / 100)
+        user_y_max = int(sh * self.pos_y_max / 100)
+
+        # 旋转角度影响（取最大可能角度）
+        max_angle_rad = math.radians(max(abs(self.angle_min), abs(self.angle_max), 1))
+        cos_a = abs(math.cos(max_angle_rad)) or 0.01
+        sin_a = abs(math.sin(max_angle_rad))
+
+        return {
+            'sw': sw, 'sh': sh,
+            'text_height': text_height,
+            'line_spacing': text_height * 0.3,
+            'glow_margin': glow_margin,
+            'shadow_margin': shadow_margin,
+            'base_margin': base_margin,
+            'persp_extra_x': persp_extra_x,
+            'persp_extra_y': persp_extra_y,
+            'user_x_min': user_x_min, 'user_x_max': user_x_max,
+            'user_y_min': user_y_min, 'user_y_max': user_y_max,
+            'cos_a': cos_a, 'sin_a': sin_a,
+            'max_angle_rad': max_angle_rad,
+        }
+
+    def wrap_text(self, text, max_width):
+        """将长文本按可用宽度自动折叠为多行
+
+        使用逐字符测量（与渲染一致）确保精确；边界保守，避免溢出 1-2 个字符。
+        """
+        if not text:
+            return []
+        if max_width <= 0:
+            return [text]
+
+        # 整行放得下就直接返回
+        if self._text_width(text) <= max_width:
+            return [text]
+
+        has_spaces = ' ' in text.strip()
+
+        if has_spaces:
+            # 英文/空格模式：按单词分割，整行测量
+            words = text.split(' ')
+            lines = []
+            current = ""
+            for word in words:
+                candidate = word if not current else current + ' ' + word
+                if self._text_width(candidate) <= max_width:
+                    current = candidate
+                else:
+                    if current:
+                        lines.append(current)
+                    # 单个单词超长时按字符拆分
+                    if self._text_width(word) > max_width:
+                        sub = ""
+                        for ch in word:
+                            if self._text_width(sub + ch) > max_width and sub:
+                                lines.append(sub)
+                                sub = ch
+                            else:
+                                sub += ch
+                        current = sub
+                    else:
+                        current = word
+            if current:
+                lines.append(current)
+            return lines
+        else:
+            # 中文/日文模式：按字符分割，整行测量
+            lines = []
+            current = ""
+            for ch in text:
+                if self._text_width(current + ch) > max_width and current:
+                    lines.append(current)
+                    current = ch
+                else:
+                    current += ch
+            if current:
+                lines.append(current)
+            return lines
+
     def init_char_shakes(self):
-        self.char_shakes = [{'x': 0, 'y': 0, 'target_x': 0, 'target_y': 0} for _ in self.full_text]
+        total_chars = sum(len(line) for line in self.wrapped_lines)
+        self.char_shakes = [{'x': 0, 'y': 0, 'target_x': 0, 'target_y': 0} for _ in range(total_chars)]
 
     def start_lyric(self, text, font, color, stroke_color, stroke_width,
                     angle_min, angle_max, margin_time, max_interval, max_duration,
@@ -82,11 +204,13 @@ class LyricWindow(QMainWindow):
         self.glow_size = glow_size; self.glow_alpha = glow_alpha
         self.lyric_timeline = parse_lrc(text); self.fading_lines = []
         if not self.lyric_timeline:
+            self.wrapped_lines = self.wrap_text(text, self._get_max_text_width())
             self.full_text = text; self.char_index = 0
             self.init_char_shakes(); self.place_randomly()
             self.char_timer.start(50); self.shake_timer.start(self.shake_speed)
             return
         self.current_line = 0; self.char_index = 0; self.full_text = ""
+        self.wrapped_lines = []
         self.update(); self.start_time = 0; self.line_timer.start(50)
     def compute_perspective(self):
         if not self.perspective_enabled:
@@ -101,34 +225,79 @@ class LyricWindow(QMainWindow):
         self.persp_transform.setMatrix(scale_x, 0, persp_x,
                                        0, 1, persp_y,
                                        0, 0, 1)
+    def _get_max_text_width(self):
+        """计算单行文本的最大可用宽度（基于屏幕可用宽度，含保守余量）
+
+        折叠后的每行宽度不超过该值，配合 place_randomly 的回退逻辑保证
+        无论歌词落在哪里都不会溢出屏幕，且不会极限贴近屏幕边缘。
+        注意：这里不限制用户范围——用户范围只控制歌词出现的位置，
+        行宽过窄反而会导致歌词被拆得过碎。
+        """
+        c = self._compute_place_constraints()
+        sw = c['sw']
+
+        # 横向可用像素：以屏幕宽度为基准（全屏 - 左右边距 - 透视偏移）
+        margins = c['base_margin'] + c['glow_margin'] + c['shadow_margin']
+        avail = sw - 2 * (margins + c['persp_extra_x'])
+
+        # 旋转放大还原：旋转后包围盒宽 = text_width*cos + text_height*sin
+        # 预留多行高度（按最多 3 行估算）带来的 sin 方向影响
+        avail = (avail - 3 * c['text_height'] * c['sin_a']) / c['cos_a']
+
+        # 透视缩放补偿：右侧文字会被放大（scale_x = 1.0 + persp_compensation）
+        # 测量宽度是未缩放的，实际渲染时会被放大，所以要除以最大缩放比例
+        if self.perspective_enabled:
+            max_scale_x = 1.0 + self.persp_compensation  # 最坏情况：rel_x = 1.0
+            avail = avail / max_scale_x
+
+        # 保守余量（"别玩那么极限"）：留 5% + 半个字符宽度，
+        # 避免 kerning 测量误差、发光描边导致溢出 1-2 个字母
+        safety = int(avail * 0.05) + c['text_height'] // 2
+        avail -= safety
+
+        # 上限保护，防止异常大值（也要考虑透视缩放）
+        cap = int(sw * 0.78)
+        if self.perspective_enabled:
+            cap = int(cap / (1.0 + self.persp_compensation))
+        return max(min(int(avail), cap), 120)
+
     def place_randomly(self):
-        sw = self.width()
-        sh = self.height()
-        
-        # 计算当前歌词的实际渲染宽度
-        fm = QFontMetrics(self.font)
-        text_width = 0
-        for ch in self.full_text:
-            text_width += fm.horizontalAdvance(ch) + self.spacing
-        
-        # 增加安全边距，防止发光/阴影被裁切
-        safe_margin_x = int(200 + text_width)
-        safe_margin_y = 150
-        
-        # 用户设置的起始位置范围（百分比 → 像素），并与安全边距取交集
-        x_min = max(int(sw * self.pos_x_min / 100), safe_margin_x)
-        x_max = min(int(sw * self.pos_x_max / 100), sw - safe_margin_x)
-        y_min = max(int(sh * self.pos_y_min / 100), safe_margin_y)
-        y_max = min(int(sh * self.pos_y_max / 100), sh - safe_margin_y)
-        
-        # 范围被安全边距压缩到无效时，回退到安全边距范围，避免随机失败
+        c = self._compute_place_constraints()
+        sw = c['sw']
+        sh = c['sh']
+
+        # 计算最宽行的宽度（逐字符测量，与 wrap_text 一致）
+        max_line_width = max((self._text_width(line) for line in self.wrapped_lines), default=0)
+
+        text_width = max_line_width
+        total_height = len(self.wrapped_lines) * c['text_height'] + \
+                       max(0, len(self.wrapped_lines) - 1) * c['line_spacing']
+
+        # 计算旋转后的包围盒宽度
+        rotated_w = text_width * c['cos_a'] + total_height * c['sin_a']
+
+        # 安全边距（基础边距 + 发光 + 阴影）
+        base = c['base_margin'] + c['glow_margin'] + c['shadow_margin']
+        left_margin = int(base)
+        right_margin = int(rotated_w + base)
+        top_margin = int(base)
+        bottom_margin = int(total_height + base)
+
+        # 与用户设置的起始位置范围取交集，确保文本不溢出
+        x_min = max(c['user_x_min'], left_margin + c['persp_extra_x'])
+        x_max = min(c['user_x_max'], sw - right_margin - c['persp_extra_x'])
+        y_min = max(c['user_y_min'], top_margin + c['persp_extra_y'])
+        y_max = min(c['user_y_max'], sh - bottom_margin - c['persp_extra_y'])
+
+        # 范围无效时，回退到安全范围内
         if x_max <= x_min:
-            x_min = safe_margin_x
-            x_max = max(safe_margin_x + 1, sw - safe_margin_x)
+            x_min = left_margin + c['persp_extra_x']
+            x_max = max(x_min + 1, sw - right_margin - c['persp_extra_x'])
         if y_max <= y_min:
-            y_min = safe_margin_y
-            y_max = max(safe_margin_y + 1, sh - safe_margin_y)
-        
+            y_min = top_margin + c['persp_extra_y']
+            y_max = max(y_min + 1, sh - bottom_margin - c['persp_extra_y'])
+
+        # self.x 是文本左边缘，self.y 是文本基线位置
         self.x = random.randint(x_min, x_max)
         self.y = random.randint(y_min, y_max)
         self.angle = random.randint(self.angle_min, self.angle_max)
@@ -140,15 +309,16 @@ class LyricWindow(QMainWindow):
         while (self.current_line < len(self.lyric_timeline) and
                self.lyric_timeline[self.current_line][0] <= elapsed):
             if self.full_text and self.char_index > 0:
-                fading = FadingLine(self.full_text, self.font, self.x, self.y, self.angle,
+                fading = FadingLine(self.wrapped_lines, self.font, self.x, self.y, self.angle,
                     self.text_color, self.stroke_color, self.stroke_width,
                     self.mode, self.spacing, self.shake_intensity,
                     self.fade_speed, self.rise_speed,
                     self.glow, self.glow_color, self.glow_size, self.glow_alpha,
-    self.persp_transform)
+                    self.persp_transform)
                 self.fading_lines.append(fading)
             line_text = self.lyric_timeline[self.current_line][1]
             self.full_text = line_text; self.char_index = 0
+            self.wrapped_lines = self.wrap_text(line_text, self._get_max_text_width())
             self.init_char_shakes(); self.place_randomly()
             if self.current_line + 1 < len(self.lyric_timeline):
                 next_time = self.lyric_timeline[self.current_line + 1][0]
@@ -171,13 +341,15 @@ class LyricWindow(QMainWindow):
                 elapsed_total = time.time() * 1000 - self.start_time
                 if elapsed_total >= self.song_duration:
                     self.current_line = 0; self.char_index = 0; self.full_text = ""
+                    self.wrapped_lines = []
                     self.start_time = time.time() * 1000
                     self.fading_lines = []; self.update()
             else:
                 self.line_timer.stop()
 
     def show_next_char(self):
-        if self.char_index < len(self.full_text):
+        total_chars = sum(len(line) for line in self.wrapped_lines)
+        if self.char_index < total_chars:
             self.char_index += 1; self.update()
         else:
             self.char_timer.stop()
@@ -201,15 +373,17 @@ class LyricWindow(QMainWindow):
         self.full_text = ""; self.char_index = 0
         self.lyric_timeline = []; self.current_line = 0
         self.fading_lines = []; self.char_shakes = []
+        self.wrapped_lines = []
         self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
         for f in self.fading_lines: f.draw(painter)
-        if self.char_index == 0 or not self.full_text: return
-        draw_text = self.full_text[:self.char_index]
-        font = QFont(self.font); fm = QFontMetrics(font)
+        if self.char_index == 0 or not self.wrapped_lines: return
+        fm = QFontMetrics(self.font)
         th = fm.height(); angle_rad = math.radians(self.angle)
+        line_spacing = th * 0.3
+        
         painter.save()
         if self.perspective_enabled:
             painter.setTransform(self.persp_transform, True)
@@ -218,36 +392,53 @@ class LyricWindow(QMainWindow):
             shadow_c = QColor(self.stroke_color); text_c = QColor(self.text_color)
         else:
             stroke_c = QColor(self.stroke_color); fill_c = QColor(self.text_color)
-        cursor = 0
-        for i, ch in enumerate(draw_text):
-            sx = self.char_shakes[i]['x'] if i < len(self.char_shakes) else 0
-            sy = self.char_shakes[i]['y'] if i < len(self.char_shakes) else 0
-            cw = fm.horizontalAdvance(ch)
-            ox = cursor * math.cos(angle_rad); oy = cursor * math.sin(angle_rad)
-            if self.glow:
-                glow_c = QColor(self.glow_color); gs = self.glow_size
-                gc = QColor(glow_c); gc.setAlpha(self.glow_alpha)
-                path_glow = QPainterPath()
-                path_glow.addText(ox + sx, oy + sy + th/3, font, ch)
-                pen_g = QPen(QColor(gc), gs)
-                painter.setPen(pen_g); painter.setBrush(Qt.NoBrush)
-                painter.drawPath(path_glow)
-            if self.mode == 'chinese':
-                path_shadow = QPainterPath()
-                path_shadow.addText(ox + sx + 3, oy + sy + 3 + th/3, font, ch)
-                painter.setPen(Qt.NoPen); painter.setBrush(shadow_c)
-                painter.drawPath(path_shadow)
-                path_text = QPainterPath()
-                path_text.addText(ox + sx, oy + sy + th/3, font, ch)
-                painter.setPen(Qt.NoPen); painter.setBrush(text_c)
-                painter.drawPath(path_text)
-            else:
-                path = QPainterPath()
-                path.addText(ox + sx, oy + sy + th/3, font, ch)
-                pen = QPen(stroke_c, self.stroke_width * 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-                painter.setPen(pen); painter.setBrush(fill_c)
-                painter.drawPath(path)
-            cursor += cw + self.spacing
+        
+        # 计算每行要显示多少字符
+        chars_remaining = self.char_index
+        shake_idx = 0
+        for line_idx, line_text in enumerate(self.wrapped_lines):
+            if chars_remaining <= 0:
+                break
+            show_count = min(chars_remaining, len(line_text))
+            draw_text = line_text[:show_count]
+            chars_remaining -= show_count
+            
+            # 每行的 Y 偏移
+            line_y_offset = line_idx * (th + line_spacing)
+            
+            cursor = 0
+            for i, ch in enumerate(draw_text):
+                si = shake_idx + i
+                sx = self.char_shakes[si]['x'] if si < len(self.char_shakes) else 0
+                sy = self.char_shakes[si]['y'] if si < len(self.char_shakes) else 0
+                cw = fm.horizontalAdvance(ch)
+                ox = cursor * math.cos(angle_rad)
+                oy = cursor * math.sin(angle_rad) + line_y_offset
+                if self.glow:
+                    gc = QColor(self.glow_color)
+                    gc.setAlpha(self.glow_alpha)
+                    path_glow = QPainterPath()
+                    path_glow.addText(ox + sx, oy + sy + th/3, self.font, ch)
+                    pen_g = QPen(gc, self.glow_size)
+                    painter.setPen(pen_g); painter.setBrush(Qt.NoBrush)
+                    painter.drawPath(path_glow)
+                if self.mode == 'chinese':
+                    path_shadow = QPainterPath()
+                    path_shadow.addText(ox + sx + 3, oy + sy + 3 + th/3, self.font, ch)
+                    painter.setPen(Qt.NoPen); painter.setBrush(shadow_c)
+                    painter.drawPath(path_shadow)
+                    path_text = QPainterPath()
+                    path_text.addText(ox + sx, oy + sy + th/3, self.font, ch)
+                    painter.setPen(Qt.NoPen); painter.setBrush(text_c)
+                    painter.drawPath(path_text)
+                else:
+                    path = QPainterPath()
+                    path.addText(ox + sx, oy + sy + th/3, self.font, ch)
+                    pen = QPen(stroke_c, self.stroke_width * 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+                    painter.setPen(pen); painter.setBrush(fill_c)
+                    painter.drawPath(path)
+                cursor += cw + self.spacing
+            shake_idx += len(line_text)
         painter.restore()
 
     def keyPressEvent(self, event):
