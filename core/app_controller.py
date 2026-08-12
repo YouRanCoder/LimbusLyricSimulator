@@ -15,7 +15,7 @@ from PyQt5.QtGui import QColor, QFont
 from core.player_manager import PlayerManager
 from core.lyric_service import LyricService, LyricResult
 from core.settings_manager import SettingsManager
-from core.fetcher import MediaInfo
+from core.fetcher import FetcherEvent, MediaChange, MediaInfo
 import logging
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,11 @@ class LyricSettings:
     glow_alpha: int = 82
     start_delay: int = 0
     loop: bool = True
+    # 歌词起始位置范围（百分比，0~100）
+    pos_x_min: int = 5
+    pos_x_max: int = 85
+    pos_y_min: int = 5
+    pos_y_max: int = 75
 
 
 class AppController(QObject):
@@ -89,7 +94,7 @@ class AppController(QObject):
         # 播放器管理器（回调指向内部方法）
         self.player_manager = PlayerManager(
             players_config=self.settings.get_players(),
-            song_changed_callback=self._on_song_changed_internal
+            media_changed_callback=self._on_media_changed_internal
         )
         
         # 歌词服务（初始时 fetcher 为 None，切换播放器后更新）
@@ -122,6 +127,7 @@ class AppController(QObject):
         if self.lyric_service:
             self.lyric_service.fetcher = self.player_manager.current_fetcher
         self.player_manager.start_current()
+        logging.debug(f"状态：已切换到播放器 {player_name}")
         self.status_changed.emit(f"状态：已切换到播放器 {player_name}")
     
     def start_player_listener(self) -> None:
@@ -252,6 +258,11 @@ class AppController(QObject):
             return
         
         self._lyric_window.loop = lyric_settings.loop
+        # 应用歌词起始位置范围
+        self._lyric_window.pos_x_min = lyric_settings.pos_x_min
+        self._lyric_window.pos_x_max = lyric_settings.pos_x_max
+        self._lyric_window.pos_y_min = lyric_settings.pos_y_min
+        self._lyric_window.pos_y_max = lyric_settings.pos_y_max
         self._lyric_window.start_lyric(
             lyric_settings.text,
             lyric_settings.font,
@@ -308,6 +319,26 @@ class AppController(QObject):
         if self._lyric_window:
             self._lyric_window.loop = enabled
     
+    def set_pos_x_min(self, value: int) -> None:
+        """设置歌词起始 X 最小值（百分比）"""
+        if self._lyric_window:
+            self._lyric_window.pos_x_min = value
+    
+    def set_pos_x_max(self, value: int) -> None:
+        """设置歌词起始 X 最大值（百分比）"""
+        if self._lyric_window:
+            self._lyric_window.pos_x_max = value
+    
+    def set_pos_y_min(self, value: int) -> None:
+        """设置歌词起始 Y 最小值（百分比）"""
+        if self._lyric_window:
+            self._lyric_window.pos_y_min = value
+    
+    def set_pos_y_max(self, value: int) -> None:
+        """设置歌词起始 Y 最大值（百分比）"""
+        if self._lyric_window:
+            self._lyric_window.pos_y_max = value
+    
     def set_song_duration(self, duration_ms: int) -> None:
         """设置歌曲时长"""
         if self._lyric_window:
@@ -315,8 +346,18 @@ class AppController(QObject):
     
     # ---- 内部方法 ----
     
-    def _on_song_changed_internal(self, song: str, artist: str) -> None:
-        """歌曲变化时的内部处理"""
-        logger.debug("Controller 收到切歌通知: %s - %s", song, artist)
-        # 通知 UI 层触发自动播放流程
-        self.auto_play_requested.emit()
+    def _on_media_changed_internal(self, change: MediaChange) -> None:
+        """媒体变化事件处理（按事件类型分发）"""
+        if change.event == FetcherEvent.SONG_CHANGED:
+            logger.debug(
+                "Controller 收到切歌通知: %s - %s",
+                change.media.song, change.media.artist,
+            )
+            # 通知 UI 层触发自动播放流程
+            self.auto_play_requested.emit()
+        elif change.event == FetcherEvent.PLAY_STATE_CHANGED:
+            logger.debug(
+                "Controller 收到播放状态通知: %s",
+                "播放" if change.media.is_playing else "暂停",
+            )
+            # TODO: 后续可在此暂停/恢复歌词滚动、同步 UI 播放按钮等

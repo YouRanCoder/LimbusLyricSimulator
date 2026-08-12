@@ -13,7 +13,9 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 from core.fetcher import MediaInfo
 from core.search_engine import LyricSearchEngine
+from logging import getLogger
 
+logger = getLogger(__name__)
 
 @dataclass
 class LyricResult:

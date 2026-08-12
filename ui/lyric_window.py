@@ -39,6 +39,11 @@ class LyricWindow(QMainWindow):
         self.persp_transform = QTransform()
         self.screen_w = screen.width()
         self.screen_h = screen.height()
+        # 歌词起始位置范围（百分比，0~100），由控制面板实时调整
+        self.pos_x_min = 5
+        self.pos_x_max = 85
+        self.pos_y_min = 5
+        self.pos_y_max = 75
 
     def init_char_shakes(self):
         self.char_shakes = [{'x': 0, 'y': 0, 'target_x': 0, 'target_y': 0} for _ in self.full_text]
@@ -110,12 +115,22 @@ class LyricWindow(QMainWindow):
         safe_margin_x = int(200 + text_width)
         safe_margin_y = 150
         
-        # 确保最大值不小于最小值，避免短文本无法随机
-        max_x = max(safe_margin_x, sw - safe_margin_x)
-        max_y = max(safe_margin_y, sh - safe_margin_y)
+        # 用户设置的起始位置范围（百分比 → 像素），并与安全边距取交集
+        x_min = max(int(sw * self.pos_x_min / 100), safe_margin_x)
+        x_max = min(int(sw * self.pos_x_max / 100), sw - safe_margin_x)
+        y_min = max(int(sh * self.pos_y_min / 100), safe_margin_y)
+        y_max = min(int(sh * self.pos_y_max / 100), sh - safe_margin_y)
         
-        self.x = random.randint(safe_margin_x, max_x)
-        self.y = random.randint(safe_margin_y, max_y)
+        # 范围被安全边距压缩到无效时，回退到安全边距范围，避免随机失败
+        if x_max <= x_min:
+            x_min = safe_margin_x
+            x_max = max(safe_margin_x + 1, sw - safe_margin_x)
+        if y_max <= y_min:
+            y_min = safe_margin_y
+            y_max = max(safe_margin_y + 1, sh - safe_margin_y)
+        
+        self.x = random.randint(x_min, x_max)
+        self.y = random.randint(y_min, y_max)
         self.angle = random.randint(self.angle_min, self.angle_max)
         self.compute_perspective()
 

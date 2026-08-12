@@ -10,7 +10,7 @@
 """
 
 from typing import Optional, Callable, Dict, Any
-from core.fetcher import Fetcher,FetcherBySMTC
+from core.fetcher import Fetcher, FetcherBySMTC, MediaChange
 
 
 class PlayerManager:
@@ -27,17 +27,17 @@ class PlayerManager:
     def __init__(
         self, 
         players_config: Dict[str, Any],
-        song_changed_callback: Optional[Callable[[str, str], None]] = None
+        media_changed_callback: Optional[Callable[[MediaChange], None]] = None
     ):
         """
         初始化播放器管理器
         
         Args:
             players_config: 播放器配置字典，格式为 {播放器名称: {process: 进程名, pattern: 正则}}
-            song_changed_callback: 歌曲变化回调函数，签名为 callback(song, artist)
+            media_changed_callback: 媒体变化回调函数，签名为 callback(change: MediaChange)
         """
         self.players_config = players_config
-        self.song_changed_callback = song_changed_callback
+        self.media_changed_callback = media_changed_callback
         self._current_fetcher: Optional[Fetcher] = None
         self._current_player_name: Optional[str] = None
     
@@ -70,7 +70,7 @@ class PlayerManager:
         # 创建新的 Fetcher
         self._current_fetcher = FetcherBySMTC(
             player_name=player_name,
-            callback=self.song_changed_callback,
+            callback=self.media_changed_callback,
             players=self.players_config,
         )
         self._current_player_name = player_name

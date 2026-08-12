@@ -11,3 +11,4 @@ wheels/
 
 .vscode
 test
+*.spec

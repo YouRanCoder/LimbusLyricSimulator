@@ -4,12 +4,12 @@
     "stroke_color": "#705109",
     "glow_color": "#ffea00",
     "glow_enabled": true,
-    "glow_size": 13,
-    "glow_alpha": 25,
+    "glow_size": 4,
+    "glow_alpha": 10,
     "loop": true,
-    "trans_only": false,
+    "trans_only": true,
     "mode": "chinese",
-    "font_family": "Mikodacs",
+    "font_family": "Lucida Handwriting",
     "font_size": 30,
     "stroke_width": 0.6,
     "spacing": 4.0,
@@ -26,9 +26,9 @@
     "source": "网易云",
     "delay": 0,
     "perspective_enabled": true,
-    "persp_x_strength": 39,
+    "persp_x_strength": 33,
     "persp_y_strength": 0,
-    "persp_compensation": 100
+    "persp_compensation": 77
   },
   "presets": {
     "通用": {

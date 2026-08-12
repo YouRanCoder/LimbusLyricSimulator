@@ -375,6 +375,41 @@ class ControlPanel(QWidget):
         mdl.addStretch()
         layout.addLayout(mdl)
 
+        # 起始位置范围（百分比）
+        pos_layout = QHBoxLayout()
+        pos_layout.addWidget(QLabel("X范围："))
+        self.pos_x_min_s = QSlider(Qt.Horizontal)
+        self.pos_x_min_s.setRange(0, 50)
+        self.pos_x_min_s.setValue(5)
+        self.pos_x_lbl = QLabel("5%")
+        pos_layout.addWidget(self.pos_x_min_s)
+        pos_layout.addWidget(self.pos_x_lbl)
+        pos_layout.addWidget(QLabel("~"))
+        self.pos_x_max_s = QSlider(Qt.Horizontal)
+        self.pos_x_max_s.setRange(50, 100)
+        self.pos_x_max_s.setValue(85)
+        self.pos_x_max_lbl = QLabel("85%")
+        pos_layout.addWidget(self.pos_x_max_s)
+        pos_layout.addWidget(self.pos_x_max_lbl)
+        layout.addLayout(pos_layout)
+
+        pos_y_layout = QHBoxLayout()
+        pos_y_layout.addWidget(QLabel("Y范围："))
+        self.pos_y_min_s = QSlider(Qt.Horizontal)
+        self.pos_y_min_s.setRange(0, 50)
+        self.pos_y_min_s.setValue(5)
+        self.pos_y_lbl = QLabel("5%")
+        pos_y_layout.addWidget(self.pos_y_min_s)
+        pos_y_layout.addWidget(self.pos_y_lbl)
+        pos_y_layout.addWidget(QLabel("~"))
+        self.pos_y_max_s = QSlider(Qt.Horizontal)
+        self.pos_y_max_s.setRange(50, 100)
+        self.pos_y_max_s.setValue(75)
+        self.pos_y_max_lbl = QLabel("75%")
+        pos_y_layout.addWidget(self.pos_y_max_s)
+        pos_y_layout.addWidget(self.pos_y_max_lbl)
+        layout.addLayout(pos_y_layout)
+
         al = QHBoxLayout()
         al.addWidget(QLabel("角度："))
         self.angle_min = QSpinBox()
@@ -442,6 +477,10 @@ class ControlPanel(QWidget):
             self.max_duration_spin.setValue(settings.get_setting('max_duration', 5000))
             self.angle_min.setValue(settings.get_setting('angle_min', -10))
             self.angle_max.setValue(settings.get_setting('angle_max', 10))
+            self.pos_x_min_s.setValue(settings.get_setting('pos_x_min', 5))
+            self.pos_x_max_s.setValue(settings.get_setting('pos_x_max', 85))
+            self.pos_y_min_s.setValue(settings.get_setting('pos_y_min', 5))
+            self.pos_y_max_s.setValue(settings.get_setting('pos_y_max', 75))
             source_name = settings.get_setting('source', '网易云')
             idx = self.source_combo.findText(source_name)
             if idx >= 0:
@@ -504,6 +543,66 @@ class ControlPanel(QWidget):
         self.loop_check.stateChanged.connect(
             lambda state: self.controller.set_loop(state == Qt.Checked)
         )
+        
+        # 起始位置范围 → 通过 Controller 控制歌词窗口
+        self.pos_x_min_s.valueChanged.connect(
+            lambda v: (self.controller.set_pos_x_min(v),
+                       self.pos_x_lbl.setText(f"{v}%"))
+        )
+        self.pos_x_max_s.valueChanged.connect(
+            lambda v: (self.controller.set_pos_x_max(v),
+                       self.pos_x_max_lbl.setText(f"{v}%"))
+        )
+        self.pos_y_min_s.valueChanged.connect(
+            lambda v: (self.controller.set_pos_y_min(v),
+                       self.pos_y_lbl.setText(f"{v}%"))
+        )
+        self.pos_y_max_s.valueChanged.connect(
+            lambda v: (self.controller.set_pos_y_max(v),
+                       self.pos_y_max_lbl.setText(f"{v}%"))
+        )
+        
+        # 光晕粗细
+        self.glow_size_slider.valueChanged.connect(
+            lambda v: self.glow_size_label.setText(str(v))
+        )
+        
+        # 光晕透明度
+        self.glow_alpha_slider.valueChanged.connect(
+            lambda v: self.glow_alpha_label.setText(str(v))
+        )
+        
+        # 颤强
+        self.shake_intensity_slider.valueChanged.connect(
+            lambda v: self.shake_intensity_label.setText(str(v))
+        )
+        
+        # 颤速
+        self.shake_speed_slider.valueChanged.connect(
+            lambda v: self.shake_speed_label.setText(f"{v} ms")
+        )
+        
+        # 淡出速度
+        self.fade_speed_slider.valueChanged.connect(
+            lambda v: self.fade_speed_label.setText(str(v))
+        )
+        
+        # 上升速度
+        self.rise_speed_slider.valueChanged.connect(
+            lambda v: self.rise_speed_label.setText(str(v))
+        )
+        
+        # 同步所有滑块标签（加载配置后标签可能未更新）
+        self._sync_slider_labels()
+    
+    def _sync_slider_labels(self) -> None:
+        """同步滑块数值标签与当前值一致"""
+        self.glow_size_label.setText(str(self.glow_size_slider.value()))
+        self.glow_alpha_label.setText(str(self.glow_alpha_slider.value()))
+        self.shake_intensity_label.setText(str(self.shake_intensity_slider.value()))
+        self.shake_speed_label.setText(f"{self.shake_speed_slider.value()} ms")
+        self.fade_speed_label.setText(str(self.fade_speed_slider.value()))
+        self.rise_speed_label.setText(str(self.rise_speed_slider.value()))
     
     def _refresh_player_list(self) -> None:
         """刷新播放器下拉列表"""
@@ -634,6 +733,10 @@ class ControlPanel(QWidget):
             glow_alpha=self.glow_alpha_slider.value(),
             start_delay=delay,
             loop=self.loop_check.isChecked(),
+            pos_x_min=self.pos_x_min_s.value(),
+            pos_x_max=self.pos_x_max_s.value(),
+            pos_y_min=self.pos_y_min_s.value(),
+            pos_y_max=self.pos_y_max_s.value(),
         )
         self.controller.start_playback(lyric_settings)
     
@@ -643,6 +746,14 @@ class ControlPanel(QWidget):
     
     def _on_auto_play(self) -> None:
         """切歌后自动重新播放"""
+        logger.debug("自动播放触发，重新开始")
+        source = self.source_combo.currentText()
+        trans_only = self.trans_check.isChecked()
+        #ToDo:这里以后也应该是一个弹窗的
+        def manual_input():
+            logger.error("自动播放时未能获取歌曲信息")
+            return None
+        self.controller.fetch_lyric(source, trans_only, manual_input)
         self._on_stop()
         self._on_start()
     
@@ -734,6 +845,10 @@ class ControlPanel(QWidget):
             'max_duration': self.max_duration_spin.value(),
             'angle_min': self.angle_min.value(),
             'angle_max': self.angle_max.value(),
+            'pos_x_min': self.pos_x_min_s.value(),
+            'pos_x_max': self.pos_x_max_s.value(),
+            'pos_y_min': self.pos_y_min_s.value(),
+            'pos_y_max': self.pos_y_max_s.value(),
             'player': self.player_combo.currentText(),
             'source': self.source_combo.currentText(),
             'delay': self.delay_combo.currentIndex(),
