@@ -28,7 +28,11 @@
     "perspective_enabled": true,
     "persp_x_strength": 33,
     "persp_y_strength": 0,
+<<<<<<< HEAD
     "persp_compensation": 77
+=======
+    "persp_compensation": 75
+>>>>>>> e2f6ca21b1c85b0b2cf054381c9c21577956926a
   },
   "presets": {
     "通用": {
