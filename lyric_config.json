@@ -7,14 +7,14 @@
     "glow_size": 4,
     "glow_alpha": 10,
     "loop": true,
-    "trans_only": true,
+    "trans_only": false,
     "mode": "chinese",
     "font_family": "Lucida Handwriting",
     "font_size": 30,
     "stroke_width": 0.6,
     "spacing": 4.0,
     "shake_intensity": 2,
-    "shake_speed": 143,
+    "shake_speed": 148,
     "fade_speed": 6,
     "rise_speed": 1,
     "margin_time": 2000,
@@ -22,17 +22,17 @@
     "max_duration": 4000,
     "angle_min": -10,
     "angle_max": 10,
-    "player": "网易云音乐",
+    "player": "QQ音乐",
     "source": "网易云",
     "delay": 0,
     "perspective_enabled": true,
-    "persp_x_strength": 33,
+    "persp_x_strength": 31,
     "persp_y_strength": 0,
-<<<<<<< HEAD
-    "persp_compensation": 77
-=======
-    "persp_compensation": 75
->>>>>>> e2f6ca21b1c85b0b2cf054381c9c21577956926a
+    "persp_compensation": 77,
+    "pos_x_min": 5,
+    "pos_x_max": 50,
+    "pos_y_min": 5,
+    "pos_y_max": 75
   },
   "presets": {
     "通用": {
@@ -111,7 +111,7 @@
       "pattern": "^(.+)\\s*-\\s*(.+?)$"
     },
     "QQ音乐": {
-      "process": "qqmusic.exe",
+      "process": "QQMusic.exe",
       "pattern": "^(.+)\\s*-\\s*(.+?)\\s*-\\s*QQ音乐$"
     }
   }

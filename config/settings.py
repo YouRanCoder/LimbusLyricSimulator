@@ -17,7 +17,7 @@ DEFAULT_PLAYERS = {
         "pattern": r'^(.+)\s*-\s*(.+?)$'
     },
     "QQ音乐": {
-        "process": "qqmusic.exe",
+        "process": "QQMusic.exe",
         "pattern": r'^(.+)\s*-\s*(.+?)\s*-\s*QQ音乐$'
     }
 }
