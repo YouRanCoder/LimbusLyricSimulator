@@ -10,12 +10,12 @@
 
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict, Any
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor, QFont
 from core.player_manager import PlayerManager
 from core.lyric_service import LyricService, LyricResult
 from core.settings_manager import SettingsManager
-from core.fetcher import FetcherEvent, MediaChange, MediaInfo
+from core.fetcher import Fetcher, FetcherEvent, MediaChange, MediaInfo
 import logging
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,11 @@ class AppController(QObject):
         # UI 层引用（通过 set_ui 注入）
         self._control_panel = None
         self._lyric_window = None
+        
+        # 播放器真实进度轮询（实时适配歌词时间轴）
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(200)
+        self._progress_timer.timeout.connect(self._sync_playback_progress)
     
     def set_ui(self, control_panel, lyric_window) -> None:
         """
@@ -288,13 +293,43 @@ class AppController(QObject):
             lyric_settings.glow_alpha,
             start_delay=lyric_settings.start_delay
         )
+        # 若播放器支持进度查询，用真实播放进度驱动歌词时间轴
+        self._start_progress_sync()
         self.status_changed.emit(f"状态：正在播放... 模式：{lyric_settings.mode}")
     
     def stop_playback(self) -> None:
         """停止播放歌词"""
+        self._stop_progress_sync()
         if self._lyric_window:
             self._lyric_window.stop_lyric()
             self.status_changed.emit("状态：已停止")
+
+    def _start_progress_sync(self) -> None:
+        """开始轮询播放器真实进度（仅当当前 Fetcher 支持进度查询）"""
+        fetcher = self.player_manager.current_fetcher
+        if fetcher is not None and fetcher.supports(Fetcher.CAP_PROGRESS):
+            self._progress_timer.start()
+        else:
+            self._progress_timer.stop()
+
+    def _stop_progress_sync(self) -> None:
+        """停止轮询播放器进度"""
+        self._progress_timer.stop()
+
+    def _sync_playback_progress(self) -> None:
+        """轮询播放器真实进度并同步到歌词窗口，实现时间轴实时适配"""
+        fetcher = self.player_manager.current_fetcher
+        if fetcher is None or self._lyric_window is None:
+            return
+        try:
+            progress = fetcher.get_progress()
+            if progress is not None:
+                self._lyric_window.set_external_time(int(progress * 1000))
+            duration = fetcher.get_duration()
+            if duration:
+                self._lyric_window.song_duration = int(duration * 1000)
+        except Exception:
+            logger.debug("读取播放器进度失败", exc_info=True)
 
     def pause_playback(self) -> None:
         """暂停歌词播放：定格当前画面，不销毁歌词窗口"""

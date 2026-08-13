@@ -22,6 +22,9 @@ class LyricWindow(QMainWindow):
         self.glow = True; self.glow_color = QColor("#d8a523")
         self.glow_size = 4; self.glow_alpha = 82
         self.loop = True; self.song_duration = 0; self.start_delay = 0
+        # 播放器真实进度（毫秒，None 表示内部计时）；_last_external_time 用于检测进度回落（seek/循环）
+        self.external_time = None; self._last_external_time = None
+        self._progress_rewound = False
         self.full_text = ""; self.char_index = 0
         self.x = 500; self.y = 300; self.angle = 0
         self.char_timer = QTimer(self); self.char_timer.timeout.connect(self.show_next_char)
@@ -305,48 +308,133 @@ class LyricWindow(QMainWindow):
         self.compute_perspective()
 
     def check_lyric_time(self):
-        if self.start_time == 0: self.start_time = time.time() * 1000
-        elapsed = time.time() * 1000 - self.start_time
-        while (self.current_line < len(self.lyric_timeline) and
-               self.lyric_timeline[self.current_line][0] <= elapsed):
-            if self.full_text and self.char_index > 0:
-                fading = FadingLine(self.wrapped_lines, self.font, self.x, self.y, self.angle,
-                    self.text_color, self.stroke_color, self.stroke_width,
-                    self.mode, self.spacing, self.shake_intensity,
-                    self.fade_speed, self.rise_speed,
-                    self.glow, self.glow_color, self.glow_size, self.glow_alpha,
-                    self.persp_transform)
-                self.fading_lines.append(fading)
-            line_text = self.lyric_timeline[self.current_line][1]
-            self.full_text = line_text; self.char_index = 0
-            self.wrapped_lines = self.wrap_text(line_text, self._get_max_text_width())
-            self.init_char_shakes(); self.place_randomly()
-            if self.current_line + 1 < len(self.lyric_timeline):
-                next_time = self.lyric_timeline[self.current_line + 1][0]
-                current_time = self.lyric_timeline[self.current_line][0]
-                interval = next_time - current_time
-                if interval > self.max_interval:
-                    char_count = len(line_text)
-                    calc_speed = max(30, int(self.max_duration / char_count)) if char_count > 0 else 50
-                else:
-                    interval -= self.margin_time
-                    char_count = len(line_text)
-                    calc_speed = max(30, int(interval / char_count)) if char_count > 0 else 50
+        # 时间基准：优先使用播放器真实进度（实时适配），否则回退到内部计时
+        if self.external_time is not None:
+            elapsed = self.external_time
+        else:
+            if self.start_time == 0: self.start_time = time.time() * 1000
+            elapsed = time.time() * 1000 - self.start_time
+
+        timeline = self.lyric_timeline
+        if not timeline:
+            return
+
+        # 外部进度明显回落（seek 回退/单曲循环归零）：一次性重新定位到对应行。
+        # 只有回落超过阈值（set_external_time 中检测）才触发，避免播放器进度在
+        # 行边界轻微抖动时反复重定位，导致歌词满屏随机跳位（乱飞）。
+        if self.external_time is not None and self._progress_rewound:
+            self._progress_rewound = False  # 只处理一次，防止 line_timer 重复触发
+            self._seek_to(elapsed)
+            return
+
+        # 前进：推进到 elapsed 时刻应显示的行
+        if (self.current_line < len(timeline) and
+                timeline[self.current_line][0] <= elapsed):
+            target = self._find_line_index(elapsed)
+            if target > self.current_line:
+                # 进度一次跨越多行（seek 前进）：直接定位到目标行，
+                # 避免逐行激活产生多个随机位置的残影
+                if self.full_text and self.char_index > 0:
+                    fading = FadingLine(self.wrapped_lines, self.font, self.x, self.y, self.angle,
+                        self.text_color, self.stroke_color, self.stroke_width,
+                        self.mode, self.spacing, self.shake_intensity,
+                        self.fade_speed, self.rise_speed,
+                        self.glow, self.glow_color, self.glow_size, self.glow_alpha,
+                        self.persp_transform)
+                    self.fading_lines = [fading]  # 只保留跳转前一句，清掉更早残影
+                self._activate_line(target)
+                self.current_line = target + 1
             else:
-                calc_speed = 50
-            self.char_timer.start(calc_speed)
-            self.shake_timer.start(self.shake_speed)
-            self.current_line += 1
-        if self.current_line >= len(self.lyric_timeline):
+                # 正常逐句推进（一次一行）
+                while (self.current_line < len(timeline) and
+                       timeline[self.current_line][0] <= elapsed):
+                    if self.full_text and self.char_index > 0:
+                        fading = FadingLine(self.wrapped_lines, self.font, self.x, self.y, self.angle,
+                            self.text_color, self.stroke_color, self.stroke_width,
+                            self.mode, self.spacing, self.shake_intensity,
+                            self.fade_speed, self.rise_speed,
+                            self.glow, self.glow_color, self.glow_size, self.glow_alpha,
+                            self.persp_transform)
+                        self.fading_lines.append(fading)
+                    self._activate_line(self.current_line)
+                    self.current_line += 1
+
+        # 播完处理
+        if self.current_line >= len(timeline):
             if self.loop and self.song_duration > 0:
-                elapsed_total = time.time() * 1000 - self.start_time
-                if elapsed_total >= self.song_duration:
-                    self.current_line = 0; self.char_index = 0; self.full_text = ""
-                    self.wrapped_lines = []
-                    self.start_time = time.time() * 1000
-                    self.fading_lines = []; self.update()
+                # 内部模式：内部计时走完一首歌后循环重播；
+                # 外部模式靠回落检测（_progress_rewound）触发循环，这里不再处理
+                if self.external_time is None and elapsed >= self.song_duration:
+                    self._reset_playback()
             else:
                 self.line_timer.stop()
+
+    def _seek_to(self, elapsed):
+        """外部进度回落（seek 回退/单曲循环归零）后，重新定位到 elapsed 对应的行"""
+        self.fading_lines = []
+        self.full_text = ""; self.char_index = 0
+        self.wrapped_lines = []
+        self.update()
+        if elapsed < self.lyric_timeline[0][0]:
+            self.current_line = 0
+            return
+        target = self._find_line_index(elapsed)
+        self._activate_line(target)
+        self.current_line = target + 1
+
+    def _find_line_index(self, elapsed):
+        """返回 elapsed 时刻应显示的行索引（最后一个 t <= elapsed 的行）"""
+        target = 0
+        for i, (t, _) in enumerate(self.lyric_timeline):
+            if t <= elapsed:
+                target = i
+            else:
+                break
+        return target
+
+    def _activate_line(self, idx):
+        """激活第 idx 行：设置文本、折叠、随机位置与逐字动画速度"""
+        line_text = self.lyric_timeline[idx][1]
+        self.full_text = line_text; self.char_index = 0
+        self.wrapped_lines = self.wrap_text(line_text, self._get_max_text_width())
+        self.init_char_shakes(); self.place_randomly()
+        if idx + 1 < len(self.lyric_timeline):
+            next_time = self.lyric_timeline[idx + 1][0]
+            current_time = self.lyric_timeline[idx][0]
+            interval = next_time - current_time
+            if interval > self.max_interval:
+                char_count = len(line_text)
+                calc_speed = max(30, int(self.max_duration / char_count)) if char_count > 0 else 50
+            else:
+                interval -= self.margin_time
+                char_count = len(line_text)
+                calc_speed = max(30, int(interval / char_count)) if char_count > 0 else 50
+        else:
+            calc_speed = 50
+        self.char_timer.start(calc_speed)
+        self.shake_timer.start(self.shake_speed)
+
+    def _reset_playback(self):
+        """循环重播：清空当前进度，回到歌曲开头"""
+        self.current_line = 0; self.char_index = 0
+        self.full_text = ""; self.wrapped_lines = []
+        self.fading_lines = []; self.update()
+        if self.external_time is None:
+            self.start_time = time.time() * 1000
+
+    def set_external_time(self, ms):
+        """设置播放器真实进度（毫秒），驱动歌词时间轴实时适配"""
+        # 在 _last_external_time 更新前检测回落（seek/单曲循环），旧值仍可用
+        if (self._last_external_time is not None and
+                ms < self._last_external_time - 500):
+            self.fading_lines = []
+            self._progress_rewound = True
+        else:
+            self._progress_rewound = False
+        self._last_external_time = ms
+        self.external_time = ms
+        if self.lyric_timeline and self.line_timer.isActive():
+            self.check_lyric_time()
 
     def show_next_char(self):
         total_chars = sum(len(line) for line in self.wrapped_lines)
@@ -378,6 +466,8 @@ class LyricWindow(QMainWindow):
         self.lyric_timeline = []; self.current_line = 0
         self.fading_lines = []; self.char_shakes = []
         self.wrapped_lines = []
+        self.external_time = None; self._last_external_time = None
+        self._progress_rewound = False
         self._paused_at = None; self._pause_requested = False
         self.update()
 

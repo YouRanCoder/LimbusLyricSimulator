@@ -10,8 +10,9 @@
 """
 
 from typing import Optional, Callable, Dict, Any
-from core.fetcher import Fetcher, FetcherBySMTC, MediaChange
-
+from core.fetcher import Fetcher, select_fetcher, MediaChange
+from logging import getLogger
+logger = getLogger(__name__)
 
 class PlayerManager:
     """
@@ -66,13 +67,9 @@ class PlayerManager:
         
         # 停止当前播放器
         self.stop_current()
-        
+        logger.debug("当前播放器: %s", player_name)
         # 创建新的 Fetcher
-        self._current_fetcher = FetcherBySMTC(
-            player_name=player_name,
-            callback=self.media_changed_callback,
-            settings=self.players_config,
-        )
+        self._current_fetcher = select_fetcher(player_name, self.media_changed_callback, self.players_config)
         self._current_player_name = player_name
     
     def start_current(self) -> None:

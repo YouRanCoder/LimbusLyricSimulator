@@ -4,11 +4,10 @@ from abc import ABC, abstractmethod
 from asyncio import Task
 from dataclasses import dataclass
 from enum import Enum
-from math import log
-from typing import Any, Dict
+from typing import Dict
 
 from cloudmusic_detector import AsyncCloudMusic
-from cloudmusic_detector.types import PlayState, PlayingState
+from cloudmusic_detector.types import PlayingState
 from winrt._winrt_windows_media_control import GlobalSystemMediaTransportControlsSessionMediaProperties
 from winrt.windows.media.control import (
     GlobalSystemMediaTransportControlsSession,
@@ -191,7 +190,7 @@ class FetcherBySMTC(Fetcher):
 
     def __init__(self, player_name, callback=None, settings=None) -> None:
         super().__init__(player_name, callback, settings)
-        self.capabilities: set[str] = {self.CAP_EVENT}
+        self.capabilities: set[str] = {self.CAP_EVENT, self.CAP_PROGRESS}
         self.session = None
         # SessionManager
         self.manager = None
@@ -228,7 +227,29 @@ class FetcherBySMTC(Fetcher):
             artist=self._current_artist,
             is_playing=self._is_playing,
         )
+    def get_progress(self) -> float | None:
+        """返回当前播放进度（秒）；无会话或读取失败时返回 None。"""
+        if self.session is None:
+            return None
+        try:
+            timeline = self.session.get_timeline_properties()
+            if timeline is None:
+                return None
+            return timeline.position.total_seconds()
+        except Exception:
+            return None
 
+    def get_duration(self) -> float | None:
+        """返回总时长（秒）；无会话或读取失败时返回 None。"""
+        if self.session is None:
+            return None
+        try:
+            timeline = self.session.get_timeline_properties()
+            if timeline is None or timeline.end_time is None:
+                return None
+            return timeline.end_time.total_seconds()
+        except Exception:
+            return None
     # ---- 内部实现 ----
     async def init(self) -> None:
         self.manager: GlobalSystemMediaTransportControlsSessionManager = (
@@ -328,7 +349,6 @@ class FetcherBySMTC(Fetcher):
                 ),
                 notify=notify,
             )
-
 class FetcherByCMLog(Fetcher):
     """基于网易云音乐日志的获取器（事件驱动）。
     
@@ -405,5 +425,25 @@ class FetcherByCMLog(Fetcher):
     def _on_state_change(self, state) -> None:
         """播放/暂停回调（可能在其他线程触发，切回主事件循环）。"""
         self._call_on_main(self._sync_state)
-        
-        
+
+    def get_progress(self) -> float | None:
+        """返回当前播放进度（秒）。"""
+        if self._cloud_music is None:
+            return None
+        return self._cloud_music.state.position
+
+def select_fetcher(player_name: str, callback: callable = None, settings: Dict = None) -> Fetcher:
+    """根据播放器名称选择合适的Fetcher实现"""
+    if player_name.lower() == "网易云音乐":
+        return FetcherByCMLog(player_name, callback, settings)
+    else:
+        return FetcherBySMTC(player_name, callback, settings)
+__ALL__ = [
+    "MediaInfo",
+    "FetcherEvent",
+    "MediaChange",
+    "Fetcher",
+    "FetcherBySMTC",
+    "FetcherByCMLog",
+    "select_fetcher",
+]
