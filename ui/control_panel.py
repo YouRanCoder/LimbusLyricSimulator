@@ -502,7 +502,8 @@ class ControlPanel(QWidget):
         )
         self.controller.player_list_updated.connect(self._on_player_list_updated)
         self.controller.preset_list_updated.connect(self._on_preset_list_updated)
-        self.controller.auto_play_requested.connect(self._on_auto_play)
+        self.controller.song_updated.connect(self._on_song_updated)
+        self.controller.playback_status_updated.connect(self._on_playback_status_updated)
     
     def _connect_ui_events(self) -> None:
         """连接 UI 控件事件到 Controller 方法"""
@@ -744,7 +745,15 @@ class ControlPanel(QWidget):
         """停止播放"""
         self.controller.stop_playback()
     
-    def _on_auto_play(self) -> None:
+    def _on_pause(self) -> None:
+        """暂停播放：定格当前画面，不销毁歌词窗口"""
+        self.controller.pause_playback()
+    
+    def _on_resume(self) -> None:
+        """恢复播放：从暂停位置继续"""
+        self.controller.resume_playback()
+    
+    def _on_song_updated(self) -> None:
         """切歌后自动重新播放"""
         logger.debug("自动播放触发，重新开始")
         source = self.source_combo.currentText()
@@ -756,7 +765,13 @@ class ControlPanel(QWidget):
         self.controller.fetch_lyric(source, trans_only, manual_input)
         self._on_stop()
         self._on_start()
-    
+    def _on_playback_status_updated(self, status: bool) -> None:
+        """播放状态变化时自动暂停/恢复（不销毁歌词窗口）"""
+        logger.debug(f"播放状态变化：{status}")
+        if status:
+            self._on_resume()
+        else:
+            self._on_pause()
     # ---- Controller 信号处理 ----
     
     def _on_lyric_fetched(self, lyric: str, duration_ms: int, song: str, artist: str) -> None:

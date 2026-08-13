@@ -26,7 +26,7 @@
     "source": "网易云",
     "delay": 0,
     "perspective_enabled": true,
-    "persp_x_strength": 31,
+    "persp_x_strength": 14,
     "persp_y_strength": 0,
     "persp_compensation": 77,
     "pos_x_min": 5,

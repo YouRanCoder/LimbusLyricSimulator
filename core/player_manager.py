@@ -71,7 +71,7 @@ class PlayerManager:
         self._current_fetcher = FetcherBySMTC(
             player_name=player_name,
             callback=self.media_changed_callback,
-            players=self.players_config,
+            settings=self.players_config,
         )
         self._current_player_name = player_name
     

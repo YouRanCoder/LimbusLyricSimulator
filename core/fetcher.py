@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from asyncio import Task
 from dataclasses import dataclass
 from enum import Enum
+from math import log
 from typing import Any, Dict
 
 from cloudmusic_detector import AsyncCloudMusic
@@ -59,8 +60,8 @@ class MediaInfo:
 
 class FetcherEvent(Enum):
     """Fetcher 事件类型"""
-    SONG_CHANGED = "song_changed"        # 切歌（歌曲元数据变化）
-    PLAY_STATE_CHANGED = "play_state"    # 播放/暂停状态切换
+    SONG_CHANGED = "song_changed"                # 切歌（歌曲元数据变化）
+    PLAY_STATE_CHANGED = "play_state_changed"    # 播放/暂停状态切换
 
 
 @dataclass(frozen=True)
@@ -93,8 +94,7 @@ class Fetcher(ABC):
         self.player_name: str = player_name
         self.callback = callback
         self.settings: Dict = settings or {}
-        # 播放器配置（子类通过 super().__init__(player_name, callback, players) 传入）
-        self.players: Dict = self.settings
+        # 播放器配置（子类通过 super().__init__(player_name, callback, settings) 传入）
         self.capabilities = set()
         self._current_song = None
         self._current_artist = None
@@ -112,7 +112,7 @@ class Fetcher(ABC):
 
     # ---- 查询接口 ----
     @abstractmethod
-    def get_current_media(self) -> None:
+    def get_current_media(self) -> MediaInfo:
         """返回当前媒体快照 MediaInfo；无播放时返回空 MediaInfo。"""
 
     def get_progress(self) -> float | None:
@@ -189,8 +189,8 @@ class FetcherBySMTC(Fetcher):
     通过系统媒体传输控件监听指定进程的切歌事件，不提供进度查询。
     """
 
-    def __init__(self, player_name, callback=None, players=None) -> None:
-        super().__init__(player_name, callback, players)
+    def __init__(self, player_name, callback=None, settings=None) -> None:
+        super().__init__(player_name, callback, settings)
         self.capabilities: set[str] = {self.CAP_EVENT}
         self.session = None
         # SessionManager
@@ -210,6 +210,7 @@ class FetcherBySMTC(Fetcher):
         if self.session is not None:
             try:
                 self.session.remove_media_properties_changed(self.on_media_changed)
+                self.session.remove_playback_info_changed(self.on_playback_changed)
             except Exception:
                 pass
         self.session = None
@@ -230,7 +231,6 @@ class FetcherBySMTC(Fetcher):
 
     # ---- 内部实现 ----
     async def init(self) -> None:
-        logger.debug("开始初始化")
         self.manager: GlobalSystemMediaTransportControlsSessionManager = (
             await GlobalSystemMediaTransportControlsSessionManager.request_async()
         )
@@ -239,7 +239,7 @@ class FetcherBySMTC(Fetcher):
             "当前 SMTC 会话: %s",
             [s.source_app_user_model_id for s in sessions],
         )
-        process = self.players.get(self.player_name, {}).get("process", "")
+        process = self.settings.get(self.player_name, {}).get("process", "")
         self.session: GlobalSystemMediaTransportControlsSession | None = next(
             (s for s in sessions
              if s.source_app_user_model_id
@@ -253,14 +253,27 @@ class FetcherBySMTC(Fetcher):
             logger.warning("没有找到 SMTC 播放器: %s", self.player_name)
             return
         self.session.add_media_properties_changed(self.on_media_changed)
-        await self.update_song(notify=False)
+        self.session.add_playback_info_changed(self.on_playback_changed)
+        await self.update_song_info(notify=False)
+        await self.update_playback_state(notify=False)
 
     def on_media_changed(self, sender, args) -> None:
         if self._loop is None or self._loop.is_closed():
             return
         try:
             self._loop.call_soon_threadsafe(
-                lambda: asyncio.create_task(self.update_song())
+                lambda: asyncio.create_task(self.update_song_info())
+            )
+        except RuntimeError:
+            pass
+
+    def on_playback_changed(self, sender, args) -> None:
+        """播放状态变化回调"""
+        if self._loop is None or self._loop.is_closed():
+            return
+        try:
+            self._loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self.update_playback_state())
             )
         except RuntimeError:
             pass
@@ -270,20 +283,25 @@ class FetcherBySMTC(Fetcher):
         try:
             play_info = self.session.get_playback_info()
             status = play_info.playback_status
+            logger.debug("SMTC 播放状态: %s", status)
             return status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING
         except Exception:
             return self._is_playing
 
-    async def update_song(self, notify=True) -> None:
+    async def update_song_info(self, notify=True) -> None:
+        """仅更新歌曲元数据"""
         if self.session is None:
             return
-        info: GlobalSystemMediaTransportControlsSessionMediaProperties | None = await self.session.try_get_media_properties_async()
-        song, artist = info.title, info.artist
+        media_props: GlobalSystemMediaTransportControlsSessionMediaProperties | None = await self.session.try_get_media_properties_async()
+        if not media_props:
+            return
+        song, artist = media_props.title, media_props.artist
         # 同曲连续两次读取一致时再确认一次，用于识别同一首歌重新播放
         if song == self._current_song and artist == self._current_artist:
             await asyncio.sleep(0.8)
-            info: GlobalSystemMediaTransportControlsSessionMediaProperties | None = await self.session.try_get_media_properties_async()
-            song, artist = info.title, info.artist
+            media_props = await self.session.try_get_media_properties_async()
+            if media_props:
+                song, artist = media_props.title, media_props.artist
 
         is_playing = self._read_playback_status()
         self._is_playing = is_playing
@@ -292,18 +310,37 @@ class FetcherBySMTC(Fetcher):
             notify=notify,
         )
 
-class FetchByCMLog(Fetcher):
+    async def update_playback_state(self, notify=True) -> None:
+        """仅更新播放状态"""
+        if self.session is None:
+            return
+        
+        is_playing = self._read_playback_status()
+        if is_playing != self._is_playing:
+            self._is_playing = is_playing
+            logger.debug("播放状态独立更新: %s", "播放" if is_playing else "暂停")
+            # 使用当前的歌曲信息构造快照并推送
+            self._update_media(
+                MediaInfo(
+                    song=self._current_song, 
+                    artist=self._current_artist, 
+                    is_playing=is_playing
+                ),
+                notify=notify,
+            )
+
+class FetcherByCMLog(Fetcher):
     """基于网易云音乐日志的获取器（事件驱动）。
     
     通过监控网易云音乐日志文件，解析切歌事件、播放状态和播放进度。
     """
 
-    def __init__(self, player_name, callback=None, players=None) -> None:
+    def __init__(self, player_name, callback=None, settings=None) -> None:
         """callback:媒体变化回调，签名为 callback(change: MediaChange)"""
-        super().__init__(player_name, callback, players)
+        super().__init__(player_name, callback, settings)
         self.capabilities: set[str] = {self.CAP_PROGRESS, self.CAP_EVENT}
         self._task = None
-        self._cm: AsyncCloudMusic | None = None
+        self._cloud_music: AsyncCloudMusic | None = None
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -312,21 +349,21 @@ class FetchByCMLog(Fetcher):
         return super().start()
 
     async def _init(self) -> None:
-        self._cm = AsyncCloudMusic()
-        await self._cm.start()
+        self._cloud_music = AsyncCloudMusic()
+        await self._cloud_music.start()
         # 注册切歌与播放/暂停回调
-        self._cm.on_track_change(self._on_track_change)
-        self._cm.on_state_change(self._on_state_change)
+        self._cloud_music.on_track_change(self._on_track_change)
+        self._cloud_music.on_state_change(self._on_state_change)
         # 推送初始快照（不触发回调）
         self._sync_state(notify=False)
 
     def stop(self) -> None:
-        if self._cm is not None:
+        if self._cloud_music is not None:
             try:
-                asyncio.get_event_loop().create_task(self._cm.stop())
+                asyncio.get_event_loop().create_task(self._cloud_music.stop())
             except RuntimeError:
                 pass
-            self._cm = None
+            self._cloud_music = None
         if self._task is not None:
             self._task.cancel()
             self._task = None
@@ -335,29 +372,29 @@ class FetchByCMLog(Fetcher):
     # ---- 查询接口 ----
     def get_current_media(self) -> MediaInfo:
         """返回当前媒体快照 MediaInfo"""
-        if self._cm is None:
+        if self._cloud_music is None:
             return MediaInfo()
-        return MediaInfo.from_playing_state(self._cm.state)
+        return MediaInfo.from_playing_state(self._cloud_music.state)
 
     def get_progress(self) -> float | None:
         """返回当前播放进度（秒）。"""
-        if self._cm is None:
+        if self._cloud_music is None:
             return None
-        return self._cm.state.position
+        return self._cloud_music.state.position
 
     def get_duration(self) -> float | None:
         """返回总时长（秒）。"""
-        if self._cm is None or not self._cm.track:
+        if self._cloud_music is None or not self._cloud_music.track:
             return None
-        return self._cm.track.duration
+        return self._cloud_music.track.duration
 
     # ---- 内部实现 ----
     def _sync_state(self, notify: bool = True) -> None:
         """读取最新快照，通过统一的 _update_media 比对并分发事件。"""
-        if self._cm is None:
+        if self._cloud_music is None:
             return
         self._update_media(
-            MediaInfo.from_playing_state(self._cm.state),
+            MediaInfo.from_playing_state(self._cloud_music.state),
             notify=notify,
         )
 

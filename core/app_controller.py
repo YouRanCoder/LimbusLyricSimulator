@@ -81,9 +81,11 @@ class AppController(QObject):
     # 预设列表更新
     preset_list_updated = pyqtSignal(list)  # (preset_names)
     
-    # 切歌自动播放
-    auto_play_requested = pyqtSignal()
-    
+    # 歌曲更新通知
+    song_updated = pyqtSignal()
+
+    # 歌曲播放/暂停通知
+    playback_status_updated = pyqtSignal(bool)  # (is_playing)
     def __init__(self, settings: Optional[SettingsManager] = None):
         super().__init__()
         
@@ -293,6 +295,18 @@ class AppController(QObject):
         if self._lyric_window:
             self._lyric_window.stop_lyric()
             self.status_changed.emit("状态：已停止")
+
+    def pause_playback(self) -> None:
+        """暂停歌词播放：定格当前画面，不销毁歌词窗口"""
+        if self._lyric_window:
+            self._lyric_window.pause_lyric()
+            self.status_changed.emit("状态：已暂停")
+
+    def resume_playback(self) -> None:
+        """恢复歌词播放：从暂停位置继续"""
+        if self._lyric_window:
+            self._lyric_window.resume_lyric()
+            self.status_changed.emit("状态：已恢复")
     
     def set_perspective_enabled(self, enabled: bool) -> None:
         """设置 3D 透视开关"""
@@ -353,11 +367,11 @@ class AppController(QObject):
                 "Controller 收到切歌通知: %s - %s",
                 change.media.song, change.media.artist,
             )
-            # 通知 UI 层触发自动播放流程
-            self.auto_play_requested.emit()
+            # 通知 UI 层歌曲已更新，触发自动播放流程
+            self.song_updated.emit()
         elif change.event == FetcherEvent.PLAY_STATE_CHANGED:
             logger.debug(
                 "Controller 收到播放状态通知: %s",
                 "播放" if change.media.is_playing else "暂停",
             )
-            # TODO: 后续可在此暂停/恢复歌词滚动、同步 UI 播放按钮等
+            self.playback_status_updated.emit(change.media.is_playing)

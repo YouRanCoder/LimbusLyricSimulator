@@ -29,6 +29,7 @@ class LyricWindow(QMainWindow):
         self.lyric_timeline = []; self.current_line = 0
         self.line_timer = QTimer(self); self.line_timer.timeout.connect(self.check_lyric_time)
         self.start_time = 0; self.char_shakes = []
+        self._paused_at = None; self._pause_requested = False
         self.fading_lines = []
         self.fade_timer = QTimer(self); self.fade_timer.timeout.connect(self.update_fading)
         self.fade_timer.start(30)
@@ -353,6 +354,9 @@ class LyricWindow(QMainWindow):
             self.char_index += 1; self.update()
         else:
             self.char_timer.stop()
+            if self._pause_requested:
+                # 暂停中且当前句已完整显示：记录暂停时刻（颤动动画继续播放）
+                self._paused_at = time.time() * 1000
 
     def update_shake(self):
         if not self.full_text or self.char_index == 0: return
@@ -374,7 +378,35 @@ class LyricWindow(QMainWindow):
         self.lyric_timeline = []; self.current_line = 0
         self.fading_lines = []; self.char_shakes = []
         self.wrapped_lines = []
+        self._paused_at = None; self._pause_requested = False
         self.update()
+
+    def pause_lyric(self):
+        """暂停歌词播放：不再显示下一句，但保留颤动等动画效果持续播放。"""
+        if not self.full_text and not self.lyric_timeline:
+            return
+        self._pause_requested = True
+        # 立即停止行推进，不再显示下一句
+        self.line_timer.stop()
+        # 颤动动画（shake_timer）保持运行，暂停期间歌词仍在颤动
+        # 逐字显示（char_timer）：若正在逐字显示则继续播完当前句，之后由
+        # show_next_char 记录暂停时刻；若未显示或已显示完则无需处理
+        if self._paused_at is None and (not self.full_text or not self.char_timer.isActive()):
+            # 当前句已完整显示（或尚未开始）：立即记录暂停时刻
+            self._paused_at = time.time() * 1000
+
+    def resume_lyric(self):
+        """恢复歌词播放：从暂停位置继续，不跳歌。"""
+        if self._paused_at is not None:
+            # 把暂停时长补偿进 start_time，避免恢复后歌词时间瞬间跳变
+            self.start_time += time.time() * 1000 - self._paused_at
+            self._paused_at = None
+        self._pause_requested = False
+        if self.lyric_timeline:
+            self.line_timer.start(50)
+        if self.full_text:
+            self.char_timer.start()
+            self.shake_timer.start(self.shake_speed)
 
     def paintEvent(self, event):
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
