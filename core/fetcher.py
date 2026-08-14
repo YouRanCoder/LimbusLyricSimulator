@@ -1,10 +1,14 @@
 import asyncio
 import logging
+import re
 from abc import ABC, abstractmethod
 from asyncio import Task
 from dataclasses import dataclass
 from enum import Enum
+from functools import lru_cache
 from typing import Dict
+
+from config.settings import DEFAULT_INST_PATTERNS
 
 from cloudmusic_detector import AsyncCloudMusic
 from cloudmusic_detector.types import PlayingState
@@ -527,6 +531,23 @@ def select_fetcher(player_name: str, callback: callable = None, settings: Dict =
     else:
         logger.info("播放器 %s 使用 SMTC Fetcher", player_name)
         return FetcherBySMTC(player_name, callback, settings)
+
+
+@lru_cache(maxsize=16)
+def _compile_inst_regex(patterns_tuple) -> "re.Pattern":
+    return re.compile("|".join(patterns_tuple), re.IGNORECASE)
+
+
+def is_pure_music(song: str, artist: str = "", patterns=None) -> bool:
+    """判断歌曲是否为纯音乐/伴奏（按歌名/歌手特征匹配）。
+    patterns 为 None 时使用默认规则；传入列表则完全按用户规则匹配（空列表表示不过滤）。
+    """
+    if patterns is None:
+        patterns = DEFAULT_INST_PATTERNS
+    text = f"{song} {artist}".strip()
+    if not text or not patterns:
+        return False
+    return bool(_compile_inst_regex(tuple(patterns)).search(text))
 __ALL__ = [
     "MediaInfo",
     "FetcherEvent",
@@ -535,4 +556,5 @@ __ALL__ = [
     "FetcherBySMTC",
     "FetcherByCMLog",
     "select_fetcher",
+    "is_pure_music",
 ]

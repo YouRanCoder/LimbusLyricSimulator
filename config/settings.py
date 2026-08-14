@@ -21,3 +21,19 @@ DEFAULT_PLAYERS = {
         "pattern": r'^(.+)\s*-\s*(.+?)\s*-\s*QQ音乐$'
     }
 }
+
+# 纯音乐/伴奏特征正则列表（可在 lyric_config.json 的 settings.inst_patterns 中覆盖）
+DEFAULT_INST_PATTERNS = [
+    r"\(inst\.?\)",
+    r"（inst\.?）",
+    r"\[inst\.?\]",
+    r"【inst\.?】",
+    r"\binst\.?$",
+    r"instrumental",
+    r"纯音乐",
+    r"伴奏",
+    r"off\s*vocal",
+    r"offvocal",
+    r"カラオケ",
+    r"karaoke",
+]

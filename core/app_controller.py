@@ -270,6 +270,10 @@ class AppController(QObject):
         """获取设置管理器（供 UI 层读取配置）"""
         return self.settings
     
+    def get_current_media(self) -> MediaInfo:
+        """获取当前播放的媒体信息（供 UI 层判断纯音乐等）"""
+        return self.player_manager.get_current_media()
+    
     def get_player_names(self) -> list:
         """获取播放器名称列表"""
         return self.settings.get_player_names()

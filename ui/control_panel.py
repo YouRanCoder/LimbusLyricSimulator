@@ -20,6 +20,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QFont, QFontDatabase
 import qasync
 from core.app_controller import AppController, LyricSettings
+from core.fetcher import is_pure_music
 import logging
 
 
@@ -48,6 +49,8 @@ class ControlPanel(QWidget):
         self.current_color = QColor("#fffeef")
         self.current_stroke_color = QColor("#d8a523")
         self.current_glow_color = QColor("#d8a523")
+        # 纯音乐/伴奏规则（来自 lyric_config.json，None 表示用内置默认）
+        self.inst_patterns = None
         
         self.setWindowTitle("歌词字幕器 - 控制面板")
         self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
@@ -127,6 +130,13 @@ class ControlPanel(QWidget):
         adapter_layout.addWidget(self.netease_adapter_check)
         adapter_layout.addStretch()
         layout.addLayout(adapter_layout)
+
+        # 纯音乐/伴奏过滤（自动播放时按歌名特征识别，不显示歌词）
+        pure_music_layout = QHBoxLayout()
+        self.filter_pure_music_check = QCheckBox("过滤纯音乐/伴奏（不显示歌词）")
+        pure_music_layout.addWidget(self.filter_pure_music_check)
+        pure_music_layout.addStretch()
+        layout.addLayout(pure_music_layout)
 
         layout.addWidget(QLabel("歌词（粘贴LRC格式）："))
         self.text_input = QTextEdit()
@@ -473,6 +483,8 @@ class ControlPanel(QWidget):
             self.persp_comp_slider.setValue(settings.get_setting('persp_compensation', 3))
             self.trans_check.setChecked(settings.get_setting('trans_only', False))
             self.netease_adapter_check.setChecked(settings.get_setting('netease_adapter_enabled', True))
+            self.filter_pure_music_check.setChecked(settings.get_setting('filter_pure_music', True))
+            self.inst_patterns = settings.get_setting('inst_patterns', None)
             idx = self.mode_combo.findData(settings.get_setting('mode', 'chinese'))
             if idx >= 0:
                 self.mode_combo.setCurrentIndex(idx)
@@ -786,6 +798,14 @@ class ControlPanel(QWidget):
         logger.debug("自动播放触发，重新开始")
         source = self.source_combo.currentText()
         trans_only = self.trans_check.isChecked()
+        # 纯音乐/伴奏过滤：命中则跳过获取，不显示歌词
+        if self.filter_pure_music_check.isChecked():
+            media = self.controller.get_current_media()
+            if is_pure_music(media.song, media.artist, self.inst_patterns):
+                logger.info("检测到纯音乐/伴奏：%s - %s，不显示歌词", media.song, media.artist)
+                self._on_stop()
+                self.status.setText("状态：纯音乐/伴奏，不显示歌词")
+                return
         #ToDo:这里以后也应该是一个弹窗的
         def manual_input():
             logger.error("自动播放时未能获取歌曲信息")
@@ -893,6 +913,7 @@ class ControlPanel(QWidget):
             'loop': self.loop_check.isChecked(),
             'trans_only': self.trans_check.isChecked(),
             'netease_adapter_enabled': self.netease_adapter_check.isChecked(),
+            'filter_pure_music': self.filter_pure_music_check.isChecked(),
             'mode': self.mode_combo.currentData(),
             'font_family': self.font_combo.currentText(),
             'font_size': self.font_size.value(),
