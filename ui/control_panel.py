@@ -654,6 +654,15 @@ class ControlPanel(QWidget):
         trans_only = self.trans_check.isChecked()
         logger.info("用户点击获取歌词：来源=%s，仅翻译=%s", source, trans_only)
 
+        # 纯音乐/伴奏过滤：命中则跳过获取，不显示歌词
+        if self.filter_pure_music_check.isChecked():
+            media = self.controller.get_current_media()
+            if is_pure_music(media.song, media.artist, self.inst_patterns):
+                logger.info("检测到纯音乐/伴奏：%s - %s，不显示歌词", media.song, media.artist)
+                self._on_stop()
+                self.status.setText("状态：纯音乐/伴奏，不显示歌词")
+                return
+
         def manual_input():
             text, ok = QInputDialog.getText(
                 self, "手动输入",
