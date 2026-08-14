@@ -57,7 +57,7 @@ class LyricSearchEngine:
                 song = songs[0]
                 songmid = song.get('songmid')
                 duration = song.get('interval', 0) * 1000
-                lyric_url = f"https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={songmid}&format=json&nobase64=1"
+                lyric_url = f"https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={songmid}&format=json&nobase64=0"
                 lrc_resp = await cls._get(lyric_url, headers=headers)
                 lrc_data = lrc_resp.json()
                 lyric = lrc_data.get('lyric', '')

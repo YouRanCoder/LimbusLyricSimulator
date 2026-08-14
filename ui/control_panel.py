@@ -14,7 +14,7 @@ import logging
 
 from PyQt5.QtCore import QTimer
 from PyQt5.QtGui import QColor, QFont, QFontDatabase
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from qfluentwidgets import (
     FluentIcon,
@@ -24,6 +24,7 @@ from qfluentwidgets import (
 
 import qasync
 from core.app_controller import AppController, LyricSettings
+from core.autostart import is_autostart_enabled, set_autostart
 from core.fetcher import is_pure_music
 from ui.dialogs import ask_text, confirm, warn
 from ui.pages import AnimationPage, AppearancePage, PlaybackPage, TimelinePage
@@ -96,6 +97,13 @@ class ControlPanel(FluentWindow):
         if idx >= 0:
             self._playback.player_combo.setCurrentIndex(idx)
 
+        # 开机自启动配置与注册表同步（注册表被手动清理时自动补上）
+        if self._playback.autostart_check.isChecked() and not is_autostart_enabled():
+            set_autostart(True)
+
+        # 系统托盘（最小化到托盘）
+        self._init_tray()
+
         # 启动播放器监听（延迟到事件循环运行后）
         QTimer.singleShot(0, self.controller.start_player_listener)
 
@@ -117,6 +125,10 @@ class ControlPanel(FluentWindow):
             n.persp_y_slider.setValue(settings.get_setting('persp_y_strength', 30))
             n.persp_comp_slider.setValue(settings.get_setting('persp_compensation', 3))
             p.trans_check.setChecked(settings.get_setting('trans_only', False))
+            p.autostart_check.setChecked(settings.get_setting('autostart_enabled', False))
+            close_idx = p.close_behavior_combo.findData(settings.get_setting('close_behavior', 'quit'))
+            if close_idx >= 0:
+                p.close_behavior_combo.setCurrentIndex(close_idx)
             p.netease_adapter_check.setChecked(settings.get_setting('netease_adapter_enabled', True))
             p.filter_pure_music_check.setChecked(settings.get_setting('filter_pure_music', True))
             self.inst_patterns = settings.get_setting('inst_patterns', None)
@@ -162,6 +174,8 @@ class ControlPanel(FluentWindow):
             'glow_alpha': n.glow_alpha_slider.value(),
             'loop': t.loop_check.isChecked(),
             'trans_only': p.trans_check.isChecked(),
+            'autostart_enabled': p.autostart_check.isChecked(),
+            'close_behavior': p.close_behavior_combo.currentData(),
             'netease_adapter_enabled': p.netease_adapter_check.isChecked(),
             'filter_pure_music': p.filter_pure_music_check.isChecked(),
             'mode': a.mode_combo.currentData(),
@@ -220,6 +234,9 @@ class ControlPanel(FluentWindow):
         p.refetch_btn.clicked.connect(self._on_refetch)
         p.start_btn.clicked.connect(self._on_start)
         p.stop_btn.clicked.connect(self._on_stop)
+
+        # 开机自启动
+        p.autostart_check.checkedChanged.connect(self._on_autostart_changed)
 
         # 切换歌词源/仅翻译时重新获取歌词（不自动重启）
         p.source_combo.currentTextChanged.connect(self._on_source_changed)
@@ -569,6 +586,63 @@ class ControlPanel(FluentWindow):
             )
         self.controller.set_netease_adapter(enabled)
 
+    def _on_autostart_changed(self, enabled: bool) -> None:
+        """开机自启动开关：写入/移除注册表启动项"""
+        if set_autostart(enabled):
+            logger.info("开机自启动已%s", "开启" if enabled else "关闭")
+            return
+        # 设置失败：回滚开关并提示
+        p = self._playback
+        p.autostart_check.blockSignals(True)
+        p.autostart_check.setChecked(not enabled)
+        p.autostart_check.blockSignals(False)
+        warn(self, "开机自启动", "设置开机自启动失败，请稍后重试")
+
+    # ---- 系统托盘 ----
+
+    def _init_tray(self) -> None:
+        """创建系统托盘图标（支持最小化到托盘）"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.info("当前系统不支持托盘，跳过托盘初始化")
+            return
+        self._tray = QSystemTrayIcon(FluentIcon.MUSIC.icon(), self)
+        self._tray.setToolTip("歌词字幕器")
+        menu = QMenu()
+        show_action = menu.addAction("显示主面板")
+        show_action.triggered.connect(self._show_from_tray)
+        menu.addSeparator()
+        quit_action = menu.addAction("退出")
+        quit_action.triggered.connect(self._quit_from_tray)
+        self._tray.setContextMenu(menu)
+        self._tray.activated.connect(self._on_tray_activated)
+        self._tray.show()
+        # 有托盘后，关闭窗口不再自动退出，由托盘菜单控制
+        QApplication.setQuitOnLastWindowClosed(False)
+
+    def _on_tray_activated(self, reason) -> None:
+        """单击/双击托盘图标恢复显示主面板"""
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self._show_from_tray()
+
+    def _show_from_tray(self) -> None:
+        """从托盘恢复显示主面板"""
+        self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self) -> None:
+        """从托盘退出程序"""
+        self._quit_app()
+
+    def _quit_app(self) -> None:
+        """保存配置并退出程序"""
+        settings = self.controller.get_settings()
+        settings.update_settings(self._collect_ui_settings())
+        logger.info("退出程序，保存配置")
+        self.controller.save_and_close()
+        QApplication.quit()
+
     # ---- Controller 信号处理 ----
 
     def _on_lyric_fetched(self, lyric: str, duration_ms: int, song: str, artist: str) -> None:
@@ -614,12 +688,11 @@ class ControlPanel(FluentWindow):
         p.status.setText(f"状态：已切换字体 {chosen}")
 
     def closeEvent(self, event) -> None:
-        """窗口关闭时保存配置"""
-        # 将 UI 设置同步到 SettingsManager
-        settings = self.controller.get_settings()
-        settings.update_settings(self._collect_ui_settings())
-        # 保存并关闭
-        logger.info("关闭控制面板，保存配置")
-        self.controller.save_and_close()
-        QApplication.quit()
+        """窗口关闭：按「关闭按钮行为」设置决定最小化到托盘或退出"""
+        if hasattr(self, '_tray') and self._playback.close_behavior_combo.currentData() == "tray":
+            logger.info("关闭按钮行为为最小化到托盘，隐藏主面板")
+            event.ignore()
+            self.hide()
+            return
+        self._quit_app()
         super().closeEvent(event)

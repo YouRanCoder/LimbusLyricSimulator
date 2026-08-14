@@ -92,6 +92,16 @@ class PlaybackPage:
         action_group = SettingCardGroup("操作", self.page)
         action_group.addSettingCard(action_card)
         action_group.addSettingCard(status_card)
+        autostart_card, self.autostart_check = switch_card(
+            FluentIcon.POWER_BUTTON, "开机自启动",
+            "开机后自动启动本程序（写入注册表启动项）", checked=False)
+        action_group.addSettingCard(autostart_card)
+
+        self.close_behavior_combo = ComboBox()
+        self.close_behavior_combo.addItem("退出程序", userData="quit")
+        self.close_behavior_combo.addItem("最小化到托盘", userData="tray")
+        action_group.addSettingCard(widget_card(
+            FluentIcon.CLOSE, "关闭按钮行为", self.close_behavior_combo))
 
         self.vbox.addWidget(player_group)
         self.vbox.addWidget(lyric_card)

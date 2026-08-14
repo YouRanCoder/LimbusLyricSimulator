@@ -49,7 +49,9 @@
     "pos_x_max": 50,
     "pos_y_min": 5,
     "pos_y_max": 75,
-    "zoom": 100
+    "zoom": 100,
+    "autostart_enabled": false,
+    "close_behavior": "quit"
   },
   "presets": {
     "通用": {
