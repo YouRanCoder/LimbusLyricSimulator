@@ -3,7 +3,7 @@ import asyncio
 import logging
 
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import QtMsgType, qInstallMessageHandler
+from PyQt5.QtCore import QTimer, QtMsgType, qInstallMessageHandler
 import qasync
 
 from config.logging_setup import setup_logging
@@ -46,20 +46,27 @@ if __name__ == "__main__":
         settings.load()
         logger.info("配置加载完成")
 
-        # 2. 创建歌词窗口（UI 层）
+        # 2. 创建歌词窗口（UI 层），先显示让首帧尽快渲染
         lyric_window = LyricWindow()
         lyric_window.show()
+        # 同步处理 show 事件，强制完成首帧绘制，避免之后构建控制面板时
+        # 窗口尚未渲染（Windows 上未完成首次绘制的透明窗会显示白色占位）
+        app.processEvents()
 
         # 3. 创建应用控制器（业务协调层）
         controller = AppController(settings=settings)
 
-        # 4. 创建控制面板（UI 层），注入控制器
-        panel = ControlPanel(controller=controller)
-        panel.show()
+        # 4. 控制面板延迟到事件循环启动后构建：
+        #    控件构造时存在一次性字体度量初始化（本机约 0.5s），若在事件循环
+        #    启动前同步构建，会阻塞首帧渲染导致启动白屏。先显示歌词窗口，
+        #    再进入事件循环渲染首帧，最后异步构建控制面板。
+        def _create_panel():
+            panel = ControlPanel(controller=controller)
+            panel.show()
+            controller.set_ui(panel, lyric_window)
+            logger.info("界面初始化完成")
 
-        # 5. 将 UI 注册到控制器
-        controller.set_ui(panel, lyric_window)
-        logger.info("界面初始化完成")
+        QTimer.singleShot(0, _create_panel)
     except Exception:
         logger.critical("程序初始化失败", exc_info=True)
         raise

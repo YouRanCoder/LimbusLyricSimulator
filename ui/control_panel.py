@@ -13,11 +13,11 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QSlider, QColorDialog, QSpinBox,
-    QFontComboBox, QComboBox, QCheckBox, QInputDialog, QMessageBox,
+    QComboBox, QCheckBox, QInputDialog, QMessageBox,
     QDoubleSpinBox, QScrollArea,
 )
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtGui import QColor, QFont, QFontDatabase
 import qasync
 from core.app_controller import AppController, LyricSettings
 import logging
@@ -248,8 +248,11 @@ class ControlPanel(QWidget):
 
         fl = QHBoxLayout()
         fl.addWidget(QLabel("字体："))
-        self.font_combo = QFontComboBox()
-        self.font_combo.setCurrentFont(QFont("Microsoft YaHei"))
+        # QFontComboBox 构造时会枚举并加载系统全部字体（312 个字体约 520ms，
+        # 直接拖慢启动出现白屏），改用普通 QComboBox 填充字体家族名（仅 ~2ms）
+        self.font_combo = QComboBox()
+        self.font_combo.addItems(QFontDatabase().families())
+        self.font_combo.setCurrentText("Microsoft YaHei")
         fl.addWidget(self.font_combo)
         fl.addWidget(QLabel("大小："))
         self.font_size = QSpinBox()
@@ -465,7 +468,7 @@ class ControlPanel(QWidget):
             idx = self.mode_combo.findData(settings.get_setting('mode', 'chinese'))
             if idx >= 0:
                 self.mode_combo.setCurrentIndex(idx)
-            self.font_combo.setCurrentFont(QFont(settings.get_setting('font_family', 'Microsoft YaHei')))
+            self.font_combo.setCurrentText(settings.get_setting('font_family', 'Microsoft YaHei'))
             self.font_size.setValue(settings.get_setting('font_size', 28))
             self.stroke_spin.setValue(settings.get_setting('stroke_width', 0.5))
             self.spacing_spin.setValue(settings.get_setting('spacing', 5.0))
@@ -719,7 +722,7 @@ class ControlPanel(QWidget):
         logger.info("用户点击开始播放：%d 字符，模式=%s",
                     len(text), self.mode_combo.currentData())
         
-        font = QFont(self.font_combo.currentFont().family(), self.font_size.value(), QFont.Bold)
+        font = QFont(self.font_combo.currentText(), self.font_size.value(), QFont.Bold)
         mode = self.mode_combo.currentData()
         delay = int(self.delay_combo.currentText().replace('s', ''))
         
@@ -847,14 +850,14 @@ class ControlPanel(QWidget):
         if not available:
             self.status.setText("状态：未找到推荐字体")
             return
-        current = self.font_combo.currentFont().family()
+        current = self.font_combo.currentText()
         try:
             idx = available.index(current)
             next_idx = (idx + 1) % len(available)
         except ValueError:
             next_idx = 0
         chosen = available[next_idx]
-        self.font_combo.setCurrentFont(QFont(chosen))
+        self.font_combo.setCurrentText(chosen)
         self.status.setText(f"状态：已切换字体 {chosen}")
     
     def _collect_ui_settings(self) -> dict:
@@ -869,7 +872,7 @@ class ControlPanel(QWidget):
             'loop': self.loop_check.isChecked(),
             'trans_only': self.trans_check.isChecked(),
             'mode': self.mode_combo.currentData(),
-            'font_family': self.font_combo.currentFont().family(),
+            'font_family': self.font_combo.currentText(),
             'font_size': self.font_size.value(),
             'stroke_width': self.stroke_spin.value(),
             'spacing': self.spacing_spin.value(),

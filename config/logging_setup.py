@@ -77,14 +77,27 @@ def setup_logging(level: int = logging.DEBUG) -> Path:
     )
     file_handler.setLevel(level)
     file_handler.setFormatter(logging.Formatter(_FILE_FORMAT, datefmt=_DATE_FORMAT))
-
-    # 控制台输出
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(logging.Formatter(_CONSOLE_FORMAT))
-
     root.addHandler(file_handler)
-    root.addHandler(console_handler)
+
+    # 第三方库 DEBUG 日志噪音极大：qasync 会在 submit 时把 to_thread 的回调
+    # 参数整体格式化（例如整个 elog 文件内容），在 UI 线程上构建巨型字符串，
+    # 导致启动白屏 0.5s，日志文件也瞬间被写满 10MB。统一降到 WARNING。
+    for noisy in (
+        "qasync",      # 线程池 submit 参数格式化（阻塞 UI + 日志暴涨）
+        "asyncio",     # proactor/事件循环内部 DEBUG
+        "winrt",       # SMTC 底层包装
+        "aiohttp",     # 歌词搜索 HTTP 客户端
+        "urllib3",     # aiohttp 底层连接池
+        "charset_normalizer",
+    ):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    # 控制台输出（PyInstaller --windowed 打包后 stdout/stderr 为 None，此时跳过）
+    if sys.stdout is not None:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(logging.Formatter(_CONSOLE_FORMAT))
+        root.addHandler(console_handler)
 
     # Windows 控制台默认编码（如 GBK）可能无法编码部分字符导致崩溃，
     # 统一改为 UTF-8 并容错替换，确保日志输出不会因编码问题中断

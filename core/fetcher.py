@@ -366,36 +366,41 @@ class FetcherBySMTC(Fetcher):
                 notify=notify,
             )
 class FetcherByCMLog(Fetcher):
-    """基于网易云音乐日志的获取器（事件驱动）。
+    """基于网易云音乐日志的获取器（事件驱动，异步启动）。
     
     通过监控网易云音乐日志文件，解析切歌事件、播放状态和播放进度。
+    
+    依赖库 AsyncCloudMusic.start()/stop() 为真异步实现：阻塞的文件读取、
+    日志回溯与 webdb 查询都通过 asyncio.to_thread 在后台线程执行，
+    不会卡住 Qt 事件循环（此前阻塞约 1~2 秒导致打包版启动卡顿）。
     """
 
     def __init__(self, player_name, callback=None, settings=None) -> None:
         """callback:媒体变化回调，签名为 callback(change: MediaChange)"""
         super().__init__(player_name, callback, settings)
         self.capabilities: set[str] = {self.CAP_PROGRESS, self.CAP_EVENT}
-        self._task = None
+        self._task: Task | None = None
         self._cloud_music: AsyncCloudMusic | None = None
 
     def start(self) -> None:
+        """异步启动网易云监听，非阻塞。"""
         if self._task is not None and not self._task.done():
             return
-        self._task: Task[None] = asyncio.get_event_loop().create_task(self._init())
+        logger.info("启动网易云日志监听：%s", self.player_name)
+        self._task = asyncio.get_event_loop().create_task(self._init())
         return super().start()
 
     async def _init(self) -> None:
-        logger.info("启动网易云日志监听：%s", self.player_name)
-        self._cloud_music = AsyncCloudMusic()
+        cm = AsyncCloudMusic()
+        # 先注册回调（依赖库会将回调调度回事件循环线程）
+        cm.on_track_change(self._on_track_change)
+        cm.on_state_change(self._on_state_change)
         try:
-            await self._cloud_music.start()
+            await cm.start()
         except Exception:
             logger.warning("启动网易云日志监听失败", exc_info=True)
-            self._cloud_music = None
             return
-        # 注册切歌与播放/暂停回调
-        self._cloud_music.on_track_change(self._on_track_change)
-        self._cloud_music.on_state_change(self._on_state_change)
+        self._cloud_music = cm
         # 推送初始快照（不触发回调）
         self._sync_state(notify=False)
         logger.debug("网易云日志监听初始化完成")
@@ -403,6 +408,7 @@ class FetcherByCMLog(Fetcher):
     def stop(self) -> None:
         if self._cloud_music is not None:
             try:
+                # stop() 内部为 to_thread 后台停止，不阻塞事件循环
                 asyncio.get_event_loop().create_task(self._cloud_music.stop())
             except RuntimeError:
                 pass
@@ -450,11 +456,6 @@ class FetcherByCMLog(Fetcher):
         """播放/暂停回调（可能在其他线程触发，切回主事件循环）。"""
         self._call_on_main(self._sync_state)
 
-    def get_progress(self) -> float | None:
-        """返回当前播放进度（秒）。"""
-        if self._cloud_music is None:
-            return None
-        return self._cloud_music.state.position
 
 def select_fetcher(player_name: str, callback: callable = None, settings: Dict = None) -> Fetcher:
     """根据播放器名称选择合适的Fetcher实现"""
