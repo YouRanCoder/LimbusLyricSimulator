@@ -739,6 +739,12 @@ class ControlPanel(QWidget):
         """开始播放"""
         text = self.text_input.toPlainText().strip()
         if not text:
+            # 无歌词文本：当前有歌曲在播放则按纯音乐处理（状态栏提示），否则提示输入歌词
+            media = self.controller.get_current_media()
+            if media.has_track:
+                logger.info("当前歌曲无歌词（%s - %s），按纯音乐处理", media.song, media.artist)
+                self.status.setText("状态：纯音乐，无歌词显示")
+                return
             logger.warning("用户点击开始，但未输入歌词")
             self.status.setText("状态：请先输入歌词！")
             return
