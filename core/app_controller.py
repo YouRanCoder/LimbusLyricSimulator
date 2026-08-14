@@ -150,7 +150,7 @@ class AppController(QObject):
         self.player_manager.stop_current()
     
     @qasync.asyncSlot()
-    async def fetch_lyric(self, source: str, trans_only: bool, manual_input_callback=None) -> None:
+    async def fetch_lyric(self, source: str, trans_only: bool, manual_input_callback=None) -> bool:
         """
         异步获取歌词（不会阻塞事件循环）
         
@@ -158,13 +158,16 @@ class AppController(QObject):
             source: 歌词源
             trans_only: 是否仅获取翻译歌词
             manual_input_callback: 手动输入回调
+            
+        Returns:
+            bool: 是否成功获取歌词（供切歌自动播放时判断是否继续）
         """
         self.status_changed.emit("状态：正在获取当前播放...")
         
         if not self.lyric_service:
             logger.error("歌词服务未初始化，无法获取歌词")
             self.lyric_fetch_failed.emit("歌词服务未初始化")
-            return
+            return False
         
         logger.info("开始获取歌词：来源=%s，仅翻译=%s", source, trans_only)
         result = await self.lyric_service.fetch_lyric_with_fallback(
@@ -177,14 +180,16 @@ class AppController(QObject):
             logger.info("歌词获取成功：%s - %s，时长 %dms", result.song, result.artist, result.duration_ms)
             self.lyric_fetched.emit(result.lyric, result.duration_ms, result.song, result.artist)
             self.status_changed.emit(f"状态：已获取「{result.song}」的歌词")
+            return True
         else:
             if not result.song and not result.artist:
                 logger.info("歌词获取已取消")
                 self.status_changed.emit("状态：已取消")
             else:
-                logger.warning("未找到歌词：%s - %s", result.song, result.artist)
+                logger.warning("未找到歌词：%s - %s（可能为纯音乐）", result.song, result.artist)
                 self.lyric_fetch_failed.emit("未找到歌词，请尝试换源")
                 self.status_changed.emit("状态：未找到歌词，请尝试换源")
+            return False
     
     def add_player(self, name: str, process: str, pattern: str) -> bool:
         """添加播放器配置"""

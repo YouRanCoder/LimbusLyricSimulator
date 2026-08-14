@@ -776,9 +776,16 @@ class ControlPanel(QWidget):
         def manual_input():
             logger.error("自动播放时未能获取歌曲信息")
             return None
-        await self.controller.fetch_lyric(source, trans_only, manual_input)
+        success = await self.controller.fetch_lyric(source, trans_only, manual_input)
+        # 无论成功与否都先停止上一首歌的歌词显示
         self._on_stop()
-        self._on_start()
+        if success:
+            # 新歌曲获取到歌词才自动播放
+            self._on_start()
+        else:
+            # 新歌曲没有歌词（如纯音乐），停止显示，避免沿用上一首的歌词
+            logger.info("新歌曲未获取到歌词（可能为纯音乐），不自动播放")
+            self.status.setText("状态：当前歌曲无歌词，不自动播放")
     def _on_playback_status_updated(self, status: bool) -> None:
         """播放状态变化时自动暂停/恢复（不销毁歌词窗口）"""
         logger.debug(f"播放状态变化：{status}")
