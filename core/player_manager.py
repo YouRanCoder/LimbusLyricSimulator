@@ -52,7 +52,7 @@ class PlayerManager:
         """获取当前播放器名称"""
         return self._current_player_name
     
-    def switch_player(self, player_name: str) -> None:
+    def switch_player(self, player_name: str, netease_adapter: bool = True, force: bool = False) -> None:
         """
         切换到指定播放器
         
@@ -60,9 +60,11 @@ class PlayerManager:
         
         Args:
             player_name: 要切换到的播放器名称
+            netease_adapter: 网易云音乐是否使用日志适配器（False 时退化为 SMTC）
+            force: 是否强制重建 Fetcher（适配方式切换时需要）
         """
         # 如果已经是当前播放器，不需要切换
-        if player_name == self._current_player_name and self._current_fetcher is not None:
+        if not force and player_name == self._current_player_name and self._current_fetcher is not None:
             logger.debug("播放器 %s 已是当前播放器，无需切换", player_name)
             return
         
@@ -70,7 +72,9 @@ class PlayerManager:
         self.stop_current()
         logger.info("切换到播放器：%s", player_name)
         # 创建新的 Fetcher
-        self._current_fetcher = select_fetcher(player_name, self.media_changed_callback, self.players_config)
+        self._current_fetcher = select_fetcher(
+            player_name, self.media_changed_callback, self.players_config, netease_adapter
+        )
         self._current_player_name = player_name
     
     def start_current(self) -> None:

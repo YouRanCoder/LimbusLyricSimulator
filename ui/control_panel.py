@@ -121,6 +121,13 @@ class ControlPanel(QWidget):
         source_layout.addStretch()
         layout.addLayout(source_layout)
 
+        # 网易云适配方式（勾选=网易云日志适配器，取消=SMTC，适用于 inflink-rs 等第三方插件）
+        adapter_layout = QHBoxLayout()
+        self.netease_adapter_check = QCheckBox("使用网易云适配")
+        adapter_layout.addWidget(self.netease_adapter_check)
+        adapter_layout.addStretch()
+        layout.addLayout(adapter_layout)
+
         layout.addWidget(QLabel("歌词（粘贴LRC格式）："))
         self.text_input = QTextEdit()
         self.text_input.setMinimumHeight(120)
@@ -465,6 +472,7 @@ class ControlPanel(QWidget):
             self.persp_y_slider.setValue(settings.get_setting('persp_y_strength', 30))
             self.persp_comp_slider.setValue(settings.get_setting('persp_compensation', 3))
             self.trans_check.setChecked(settings.get_setting('trans_only', False))
+            self.netease_adapter_check.setChecked(settings.get_setting('netease_adapter_enabled', True))
             idx = self.mode_combo.findData(settings.get_setting('mode', 'chinese'))
             if idx >= 0:
                 self.mode_combo.setCurrentIndex(idx)
@@ -548,6 +556,9 @@ class ControlPanel(QWidget):
         self.loop_check.stateChanged.connect(
             lambda state: self.controller.set_loop(state == Qt.Checked)
         )
+        
+        # 网易云适配方式 → 通过 Controller 切换（取消勾选时弹窗提醒）
+        self.netease_adapter_check.stateChanged.connect(self._on_netease_adapter_changed)
         
         # 起始位置范围 → 通过 Controller 控制歌词窗口
         self.pos_x_min_s.valueChanged.connect(
@@ -796,6 +807,16 @@ class ControlPanel(QWidget):
             self._on_resume()
         else:
             self._on_pause()
+    
+    def _on_netease_adapter_changed(self, state) -> None:
+        """网易云适配方式切换：取消勾选时弹窗提醒"""
+        enabled = (state == Qt.Checked)
+        if not enabled:
+            QMessageBox.warning(
+                self, "确定你在做什么",
+                "如果您使用inflink-rs等第三方网易云插件不能正常运行时请取消勾选，否则如果能正常运行请保持默认设置"
+            )
+        self.controller.set_netease_adapter(enabled)
     # ---- Controller 信号处理 ----
     
     def _on_lyric_fetched(self, lyric: str, duration_ms: int, song: str, artist: str) -> None:
@@ -871,6 +892,7 @@ class ControlPanel(QWidget):
             'glow_alpha': self.glow_alpha_slider.value(),
             'loop': self.loop_check.isChecked(),
             'trans_only': self.trans_check.isChecked(),
+            'netease_adapter_enabled': self.netease_adapter_check.isChecked(),
             'mode': self.mode_combo.currentData(),
             'font_family': self.font_combo.currentText(),
             'font_size': self.font_size.value(),

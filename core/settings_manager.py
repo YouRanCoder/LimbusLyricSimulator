@@ -185,6 +185,7 @@ class SettingsManager:
             'player': '网易云音乐',
             'source': '网易云',
             'delay': 0,
+            'netease_adapter_enabled': True,
             'perspective_enabled': True,
             'persp_x_strength': 5,
             'persp_y_strength': 30,

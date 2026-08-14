@@ -273,9 +273,6 @@ class FetcherBySMTC(Fetcher):
              and process.lower() in s.source_app_user_model_id.lower()),
             None,
         )
-        # 兜底：按进程名匹配不到时，使用当前正在播放的会话
-        if self.session is None:
-            self.session = self.manager.get_current_session()
         if self.session is None:
             logger.warning("没有找到 SMTC 播放器: %s", self.player_name)
             return
@@ -457,9 +454,9 @@ class FetcherByCMLog(Fetcher):
         self._call_on_main(self._sync_state)
 
 
-def select_fetcher(player_name: str, callback: callable = None, settings: Dict = None) -> Fetcher:
+def select_fetcher(player_name: str, callback: callable = None, settings: Dict = None, netease_adapter: bool = True) -> Fetcher:
     """根据播放器名称选择合适的Fetcher实现"""
-    if player_name.lower() == "网易云音乐":
+    if player_name.lower() == "网易云音乐" and netease_adapter:
         logger.info("播放器 %s 使用网易云日志 Fetcher", player_name)
         return FetcherByCMLog(player_name, callback, settings)
     else:

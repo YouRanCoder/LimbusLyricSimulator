@@ -131,13 +131,27 @@ class AppController(QObject):
     def switch_player(self, player_name: str) -> None:
         """切换播放器"""
         logger.info("切换播放器：%s", player_name)
-        self.player_manager.switch_player(player_name)
+        netease_adapter = self.settings.get_setting('netease_adapter_enabled', True)
+        self.player_manager.switch_player(player_name, netease_adapter=netease_adapter)
         # 更新歌词服务的 fetcher 引用
         if self.lyric_service:
             self.lyric_service.fetcher = self.player_manager.current_fetcher
         self.player_manager.start_current()
         logger.info("已切换到播放器 %s", player_name)
         self.status_changed.emit(f"状态：已切换到播放器 {player_name}")
+    
+    def set_netease_adapter(self, enabled: bool) -> None:
+        """切换网易云适配方式（勾选=网易云日志适配器，取消=SMTC）"""
+        logger.info("切换网易云适配方式：%s", "日志适配器" if enabled else "SMTC")
+        self.settings.set_setting('netease_adapter_enabled', enabled)
+        # 仅在当前是网易云音乐时立即重建 fetcher 以套用新的适配方式
+        if self.player_manager.current_player_name == '网易云音乐':
+            self.player_manager.switch_player('网易云音乐', netease_adapter=enabled, force=True)
+            # 更新歌词服务的 fetcher 引用
+            if self.lyric_service:
+                self.lyric_service.fetcher = self.player_manager.current_fetcher
+            self.player_manager.start_current()
+            self.status_changed.emit(f"状态：已切换网易云适配方式（{'日志' if enabled else 'SMTC'}）")
     
     def start_player_listener(self) -> None:
         """启动播放器监听（需在主事件循环中调用）"""
