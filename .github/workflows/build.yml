@@ -1,0 +1,59 @@
+name: PyInstaller 打包
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: 打包 Windows 版
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v10.0.0
+
+      - name: 安装依赖（含 dev 组的 PyInstaller）
+        run: uv sync --frozen --group dev
+
+      - name: PyInstaller 打包
+        # main.spec 按仓库约定不入库（*.spec 已 gitignore），
+        # 这里用 CLI 参数等价构建：单文件 + 无控制台窗口
+        run: uv run pyinstaller --noconfirm --onefile --windowed --name main main.py
+
+      - name: 拷贝配置文件与字体到 dist
+        shell: pwsh
+        run: |
+          Copy-Item -LiteralPath "lyric_config.json" -Destination "dist\lyric_config.json" -Force
+          New-Item -ItemType Directory -Force -Path "dist\assets" | Out-Null
+          Copy-Item -LiteralPath "assets\*.otf" -Destination "dist\assets" -Force
+
+      - name: 打 zip 包
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { 'latest' }
+          Compress-Archive -Path "dist\main.exe","dist\lyric_config.json","dist\assets" -DestinationPath "TPRLimbusLyric-$version-${{ github.sha }}.zip" -Force
+          Write-Output "已生成压缩包：TPRLimbusLyric-$version-${{ github.sha }}.zip"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: TPRLimbusLyric-windows
+          path: TPRLimbusLyric-*.zip
+          if-no-files-found: error
+
+      - name: 发布到 GitHub Release（仅推送标签时）
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: TPRLimbusLyric-*.zip
+          draft: false
+          prerelease: false
