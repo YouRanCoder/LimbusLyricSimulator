@@ -1,6 +1,6 @@
 # LimbusLyricSimulator
 
-*项目灵感来源：[Limbus-Like-Lyric-Simulator](https://github.com/TempuraYMY0728/Limbus-Like-Lyric-Simulator)在此感谢[Tempura3](https://space.bilibili.com/3546955957406045)大佬开源的歌词显示方案***
+*项目灵感来源：[Limbus-Like-Lyric-Simulator](https://github.com/TempuraYMY0728/Limbus-Like-Lyric-Simulator)在此感谢[Tempura3](https://space.bilibili.com/3546955957406045)大佬开源的歌词显示方案*
 
 # 使用说明
 
@@ -22,7 +22,7 @@
 * [X]  一次显示多行歌词
 * [X]  异步网络请求
 * [ ]  修复退出音乐软件打开另一个会发生非预期行为的问题
-* [ ]  修复必须先打开音乐软件才能识别的问题
+* [X]  修复必须先打开音乐软件才能识别的问题
 
 # 开发
 

@@ -10,7 +10,6 @@ from cloudmusic_detector import AsyncCloudMusic
 from cloudmusic_detector.types import PlayingState
 from winrt._winrt_windows_media_control import GlobalSystemMediaTransportControlsSessionMediaProperties
 from winrt.windows.media.control import (
-    GlobalSystemMediaTransportControlsSession,
     GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionMediaProperties,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
@@ -199,16 +198,19 @@ class FetcherBySMTC(Fetcher):
         self.manager = None
         self._task = None
         self._is_playing = False
+        self._stopped = False
 
     # ---- 生命周期 ----
     def start(self) -> None:
         """启动 SMTC 监听（需在主事件循环中调用，非阻塞）。"""
         if self._task is not None and not self._task.done():
             return
+        self._stopped = False
         self._task: Task[None] = asyncio.get_event_loop().create_task(self.init())
 
     def stop(self) -> None:
         """停止 SMTC 监听。"""
+        self._stopped = True
         if self.session is not None:
             try:
                 self.session.remove_media_properties_changed(self.on_media_changed)
@@ -216,6 +218,11 @@ class FetcherBySMTC(Fetcher):
             except Exception:
                 logger.debug("移除 SMTC 事件监听失败", exc_info=True)
         self.session = None
+        if self.manager is not None:
+            try:
+                self.manager.remove_sessions_changed(self._on_sessions_changed)
+            except Exception:
+                logger.debug("移除 SMTC 会话变化监听失败", exc_info=True)
         if self._task is not None:
             self._task.cancel()
             self._task = None
@@ -261,24 +268,82 @@ class FetcherBySMTC(Fetcher):
         self.manager: GlobalSystemMediaTransportControlsSessionManager = (
             await GlobalSystemMediaTransportControlsSessionManager.request_async()
         )
-        sessions = list(self.manager.get_sessions())
+        # 订阅会话变化事件：播放器后启动/重启时自动补绑定会话
+        try:
+            self.manager.add_sessions_changed(self._on_sessions_changed)
+        except Exception:
+            logger.debug("注册 SMTC 会话变化监听失败", exc_info=True)
+        # 先按当前会话快照绑定，未找到时等待 sessions_changed 事件
+        self._bind_session()
+
+    def _bind_session(self) -> None:
+        """按进程名匹配并绑定 SMTC 会话；播放器后启动/重启时由 sessions_changed 事件补绑定。"""
+        if self._stopped:
+            return
+        try:
+            sessions = list(self.manager.get_sessions())
+        except Exception:
+            logger.debug("枚举 SMTC 会话失败", exc_info=True)
+            return
         logger.debug(
             "当前 SMTC 会话: %s",
             [s.source_app_user_model_id for s in sessions],
         )
         process = self.settings.get(self.player_name, {}).get("process", "")
-        self.session: GlobalSystemMediaTransportControlsSession | None = next(
+        matched = next(
             (s for s in sessions
              if s.source_app_user_model_id
              and process.lower() in s.source_app_user_model_id.lower()),
             None,
         )
-        if self.session is None:
-            logger.warning("没有找到 SMTC 播放器: %s", self.player_name)
+        if matched is None:
+            logger.warning("没有找到 SMTC 播放器: %s，等待其启动", self.player_name)
             return
+        if self._same_session(matched):
+            return
+        # 解除旧会话监听
+        if self.session is not None:
+            try:
+                self.session.remove_media_properties_changed(self.on_media_changed)
+                self.session.remove_playback_info_changed(self.on_playback_changed)
+            except Exception:
+                logger.debug("移除旧 SMTC 会话监听失败", exc_info=True)
+        self.session = matched
         logger.info("SMTC 会话已建立：%s", self.session.source_app_user_model_id)
         self.session.add_media_properties_changed(self.on_media_changed)
         self.session.add_playback_info_changed(self.on_playback_changed)
+        self._call_on_main(self._schedule_initial_sync)
+
+    def _same_session(self, new_session) -> bool:
+        """判断 new_session 是否就是当前已绑定的会话"""
+        if self.session is None:
+            return False
+        if new_session is self.session:
+            return True
+        try:
+            return new_session.get_global_session_id() == self.session.get_global_session_id()
+        except Exception:
+            return False
+
+    def _on_sessions_changed(self, sender, args) -> None:
+        """会话列表变化（播放器后启动/重启）时重新扫描匹配会话"""
+        if self._loop is None or self._loop.is_closed():
+            return
+        try:
+            self._loop.call_soon_threadsafe(self._bind_session)
+        except RuntimeError:
+            pass
+
+    def _schedule_initial_sync(self) -> None:
+        """在事件循环上调度初始快照推送（不触发回调）"""
+        if self._loop is None or self._loop.is_closed():
+            return
+        try:
+            asyncio.ensure_future(self._initial_sync())
+        except RuntimeError:
+            pass
+
+    async def _initial_sync(self) -> None:
         await self.update_song_info(notify=False)
         await self.update_playback_state(notify=False)
 
