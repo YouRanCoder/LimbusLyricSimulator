@@ -19,6 +19,9 @@ Windows-only PyQt5 desktop app: Limbus-style floating lyric display synced to Ch
 ## Conventions & gotchas
 
 - All comments, docstrings, log messages, and status strings are written in Chinese. Match this.
+- **License**: the project is GPLv3 (see `LICENSE`). Reason: `ui/` is built on `PyQt-Fluent-Widgets` (GPLv3); keep that dependency and license in mind, do not re-introduce MIT-only claims.
+- **UI stack**: `ui/control_panel.py` is a `qfluentwidgets.FluentWindow` with 4 navigation pages (`ui/pages/*`), built from Fluent `SettingCard` rows. `ui/lyric_window.py` + `ui/fading_line.py` are custom-painting overlays and deliberately do NOT use Fluent widgets.
+- qfluentwidgets `ComboBox.addItem` signature is `(text, icon=None, userData=None)` — pass `userData=` as keyword, otherwise the second arg is treated as an icon.
 - `test/` and `*.spec` are gitignored and not tracked; keep it that way.
 - Packaging (PyInstaller `main.spec`, Nuitka) is dev-only; `pyproject.toml` has `[tool.uv] package = false`.
 - `.python-version` pins 3.14; keep in sync with `requires-python`.

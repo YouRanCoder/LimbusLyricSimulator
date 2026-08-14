@@ -3,7 +3,7 @@ import asyncio
 import logging
 
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import QTimer, QtMsgType, qInstallMessageHandler
+from PyQt5.QtCore import Qt, QTimer, QtMsgType, qInstallMessageHandler
 import qasync
 
 from config.logging_setup import setup_logging
@@ -34,6 +34,11 @@ if __name__ == "__main__":
     # 0. 初始化日志（控制台 + log/ 目录下按日期时间命名的日志文件）
     log_file = setup_logging()
     logger.info("程序启动，日志文件：%s", log_file)
+
+    # 0.5 启用高 DPI 缩放（必须在 QApplication 创建前设置），
+    #     否则在高分屏（如 200% 缩放）下文字/图标会渲染得很小
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
     qInstallMessageHandler(qt_message_handler)

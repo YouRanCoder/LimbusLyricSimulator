@@ -2,6 +2,7 @@
 name = "lyrics-show"
 version = "0.1.0"
 requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
 dependencies = [
     "netease-cloudmusic-detector>=1.0.0",
     "pyqt5==5.15.10",
@@ -9,6 +10,7 @@ dependencies = [
     "pywin32>=312",
     "httpx>=0.27.0",
     "qasync>=0.28.0",
+    "PyQt-Fluent-Widgets>=1.7.9",
     "websocket-client>=1.9.0",
     "winrt-runtime>=3.2.1",
     "winrt-windows-foundation>=3.2.1",
