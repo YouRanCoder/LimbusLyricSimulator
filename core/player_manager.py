@@ -63,11 +63,12 @@ class PlayerManager:
         """
         # 如果已经是当前播放器，不需要切换
         if player_name == self._current_player_name and self._current_fetcher is not None:
+            logger.debug("播放器 %s 已是当前播放器，无需切换", player_name)
             return
         
         # 停止当前播放器
         self.stop_current()
-        logger.debug("当前播放器: %s", player_name)
+        logger.info("切换到播放器：%s", player_name)
         # 创建新的 Fetcher
         self._current_fetcher = select_fetcher(player_name, self.media_changed_callback, self.players_config)
         self._current_player_name = player_name
@@ -75,11 +76,13 @@ class PlayerManager:
     def start_current(self) -> None:
         """启动当前播放器"""
         if self._current_fetcher is not None:
+            logger.info("启动播放器监听：%s", self._current_player_name)
             self._current_fetcher.start()
     
     def stop_current(self) -> None:
         """停止当前播放器"""
         if self._current_fetcher is not None:
+            logger.info("停止播放器监听：%s", self._current_player_name)
             self._current_fetcher.stop()
     
     def get_current_media(self):
@@ -125,7 +128,9 @@ class PlayerManager:
                 self.stop_current()
                 self._current_fetcher = None
                 self._current_player_name = None
+                logger.info("当前播放器 %s 已被删除，已清空当前状态", name)
             return True
+        logger.warning("删除播放器 %s 失败：不存在", name)
         return False
     
     def get_player_names(self) -> list:

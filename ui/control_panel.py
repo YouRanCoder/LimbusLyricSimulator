@@ -624,6 +624,10 @@ class ControlPanel(QWidget):
     
     def _on_fetch_lyric(self) -> None:
         """获取歌词按钮点击"""
+        source = self.source_combo.currentText()
+        trans_only = self.trans_check.isChecked()
+        logger.info("用户点击获取歌词：来源=%s，仅翻译=%s", source, trans_only)
+
         def manual_input():
             text, ok = QInputDialog.getText(
                 self, "手动输入",
@@ -653,6 +657,7 @@ class ControlPanel(QWidget):
         pattern, ok3 = QInputDialog.getText(
             self, "标题正则", "输入标题匹配正则：", text=r'^(.+?)\s*-\s*(.+)$')
         if ok3 and pattern.strip():
+            logger.info("添加播放器：%s（进程 %s）", name, proc.strip())
             self.controller.add_player(name, proc.strip(), pattern.strip())
             self._refresh_player_list()
             self.player_combo.setCurrentText(name)
@@ -663,6 +668,7 @@ class ControlPanel(QWidget):
         if not name:
             return
         if QMessageBox.question(self, "删除播放器", f"确定删除「{name}」吗？") == QMessageBox.Yes:
+            logger.info("删除播放器：%s", name)
             self.controller.delete_player(name)
             self._refresh_player_list()
     
@@ -676,6 +682,7 @@ class ControlPanel(QWidget):
                 'stroke': self.current_stroke_color.name(),
                 'glow': self.current_glow_color.name()
             }
+            logger.info("新建预设：%s", name)
             self.controller.add_preset(name, preset_data)
             self._refresh_preset_list()
             self.preset_combo.setCurrentText(name)
@@ -686,6 +693,7 @@ class ControlPanel(QWidget):
         if not name:
             return
         if QMessageBox.question(self, "删除预设", f"确定删除「{name}」吗？") == QMessageBox.Yes:
+            logger.info("删除预设：%s", name)
             self.controller.delete_preset(name)
             self._refresh_preset_list()
     
@@ -705,8 +713,11 @@ class ControlPanel(QWidget):
         """开始播放"""
         text = self.text_input.toPlainText().strip()
         if not text:
+            logger.warning("用户点击开始，但未输入歌词")
             self.status.setText("状态：请先输入歌词！")
             return
+        logger.info("用户点击开始播放：%d 字符，模式=%s",
+                    len(text), self.mode_combo.currentData())
         
         font = QFont(self.font_combo.currentFont().family(), self.font_size.value(), QFont.Bold)
         mode = self.mode_combo.currentData()
@@ -744,6 +755,7 @@ class ControlPanel(QWidget):
     
     def _on_stop(self) -> None:
         """停止播放"""
+        logger.info("用户点击停止播放")
         self.controller.stop_playback()
     
     def _on_pause(self) -> None:
@@ -778,6 +790,7 @@ class ControlPanel(QWidget):
     
     def _on_lyric_fetched(self, lyric: str, duration_ms: int, song: str, artist: str) -> None:
         """歌词获取成功"""
+        logger.info("歌词已填充到输入框：%s - %s，时长 %dms", song, artist, duration_ms)
         self.text_input.setPlainText(lyric)
         self.controller.set_song_duration(duration_ms)
     
@@ -881,5 +894,6 @@ class ControlPanel(QWidget):
         settings = self.controller.get_settings()
         settings.update_settings(self._collect_ui_settings())
         # 保存并关闭
+        logger.info("关闭控制面板，保存配置")
         self.controller.save_and_close()
         event.accept()

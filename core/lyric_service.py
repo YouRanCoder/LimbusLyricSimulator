@@ -57,7 +57,9 @@ class LyricService:
         Returns:
             MediaInfo: 当前媒体信息快照
         """
-        return self.fetcher.get_current_media()
+        info = self.fetcher.get_current_media()
+        logger.debug("获取当前媒体信息：%s - %s", info.song, info.artist)
+        return info
     
     async def search_lyric(
         self, 
@@ -106,17 +108,23 @@ class LyricService:
         # 1. 获取当前媒体信息
         info = self.get_current_media_info()
         song, artist = info.song, info.artist
+        logger.info("获取歌词流程启动：歌曲=%s，歌手=%s，来源=%s，仅翻译=%s",
+                    song, artist, source, trans_only)
         
         # 2. 如果获取失败，尝试手动输入
         if not info.has_track:
+            logger.warning("未能自动获取歌曲信息，尝试手动输入")
             if manual_input_callback:
                 result = manual_input_callback()
                 if result is None:
                     # 用户取消输入
+                    logger.info("用户取消手动输入")
                     return LyricResult()
                 song, artist = result
+                logger.info("手动输入歌曲信息：%s - %s", song, artist)
             else:
                 # 没有提供回调函数，直接返回空结果
+                logger.warning("未提供手动输入回调，返回空结果")
                 return LyricResult()
         
         # 3. 搜索歌词
@@ -125,6 +133,7 @@ class LyricService:
         # 4. 构建结果
         # 优先使用播放器上报的真实时长，否则用搜索接口返回的时长
         duration_ms = info.duration_ms if info.duration > 0 else duration
+        logger.info("歌词获取完成：找到=%s，时长=%dms", bool(lyric), duration_ms)
         
         return LyricResult(
             lyric=lyric or "",

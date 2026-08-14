@@ -130,7 +130,10 @@ class Fetcher(ABC):
     def _emit(self, event: FetcherEvent, media: MediaInfo) -> None:
         """统一事件发出点：所有媒体变化都通过这里推送。"""
         if self.callback:
+            logger.debug("推送事件 %s：%s - %s", event.value, media.song, media.artist)
             self.callback(MediaChange(event=event, media=media))
+        else:
+            logger.warning("无回调函数，事件 %s 被丢弃", event.value)
 
     def _update_media(self, media: MediaInfo, notify: bool = True) -> bool:
         """
@@ -211,11 +214,12 @@ class FetcherBySMTC(Fetcher):
                 self.session.remove_media_properties_changed(self.on_media_changed)
                 self.session.remove_playback_info_changed(self.on_playback_changed)
             except Exception:
-                pass
+                logger.debug("移除 SMTC 事件监听失败", exc_info=True)
         self.session = None
         if self._task is not None:
             self._task.cancel()
             self._task = None
+        logger.debug("SMTC 监听已停止：%s", self.player_name)
 
     # ---- 查询接口 ----
     def get_current_media(self) -> MediaInfo:
@@ -237,6 +241,7 @@ class FetcherBySMTC(Fetcher):
                 return None
             return timeline.position.total_seconds()
         except Exception:
+            logger.debug("读取 SMTC 播放进度失败", exc_info=True)
             return None
 
     def get_duration(self) -> float | None:
@@ -249,6 +254,7 @@ class FetcherBySMTC(Fetcher):
                 return None
             return timeline.end_time.total_seconds()
         except Exception:
+            logger.debug("读取 SMTC 总时长失败", exc_info=True)
             return None
     # ---- 内部实现 ----
     async def init(self) -> None:
@@ -273,6 +279,7 @@ class FetcherBySMTC(Fetcher):
         if self.session is None:
             logger.warning("没有找到 SMTC 播放器: %s", self.player_name)
             return
+        logger.info("SMTC 会话已建立：%s", self.session.source_app_user_model_id)
         self.session.add_media_properties_changed(self.on_media_changed)
         self.session.add_playback_info_changed(self.on_playback_changed)
         await self.update_song_info(notify=False)
@@ -307,20 +314,29 @@ class FetcherBySMTC(Fetcher):
             logger.debug("SMTC 播放状态: %s", status)
             return status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING
         except Exception:
+            logger.debug("读取 SMTC 播放状态失败，沿用上次状态", exc_info=True)
             return self._is_playing
 
     async def update_song_info(self, notify=True) -> None:
         """仅更新歌曲元数据"""
         if self.session is None:
             return
-        media_props: GlobalSystemMediaTransportControlsSessionMediaProperties | None = await self.session.try_get_media_properties_async()
+        try:
+            media_props: GlobalSystemMediaTransportControlsSessionMediaProperties | None = await self.session.try_get_media_properties_async()
+        except Exception:
+            logger.debug("读取 SMTC 歌曲信息失败", exc_info=True)
+            return
         if not media_props:
             return
         song, artist = media_props.title, media_props.artist
         # 同曲连续两次读取一致时再确认一次，用于识别同一首歌重新播放
         if song == self._current_song and artist == self._current_artist:
             await asyncio.sleep(0.8)
-            media_props = await self.session.try_get_media_properties_async()
+            try:
+                media_props = await self.session.try_get_media_properties_async()
+            except Exception:
+                logger.debug("重复读取 SMTC 歌曲信息失败", exc_info=True)
+                media_props = None
             if media_props:
                 song, artist = media_props.title, media_props.artist
 
@@ -369,13 +385,20 @@ class FetcherByCMLog(Fetcher):
         return super().start()
 
     async def _init(self) -> None:
+        logger.info("启动网易云日志监听：%s", self.player_name)
         self._cloud_music = AsyncCloudMusic()
-        await self._cloud_music.start()
+        try:
+            await self._cloud_music.start()
+        except Exception:
+            logger.warning("启动网易云日志监听失败", exc_info=True)
+            self._cloud_music = None
+            return
         # 注册切歌与播放/暂停回调
         self._cloud_music.on_track_change(self._on_track_change)
         self._cloud_music.on_state_change(self._on_state_change)
         # 推送初始快照（不触发回调）
         self._sync_state(notify=False)
+        logger.debug("网易云日志监听初始化完成")
 
     def stop(self) -> None:
         if self._cloud_music is not None:
@@ -387,6 +410,7 @@ class FetcherByCMLog(Fetcher):
         if self._task is not None:
             self._task.cancel()
             self._task = None
+        logger.info("停止网易云日志监听：%s", self.player_name)
         return super().stop()
 
     # ---- 查询接口 ----
@@ -435,8 +459,10 @@ class FetcherByCMLog(Fetcher):
 def select_fetcher(player_name: str, callback: callable = None, settings: Dict = None) -> Fetcher:
     """根据播放器名称选择合适的Fetcher实现"""
     if player_name.lower() == "网易云音乐":
+        logger.info("播放器 %s 使用网易云日志 Fetcher", player_name)
         return FetcherByCMLog(player_name, callback, settings)
     else:
+        logger.info("播放器 %s 使用 SMTC Fetcher", player_name)
         return FetcherBySMTC(player_name, callback, settings)
 __ALL__ = [
     "MediaInfo",

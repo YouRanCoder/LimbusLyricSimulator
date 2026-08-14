@@ -6,6 +6,7 @@ Windows-only PyQt5 desktop app: Limbus-style floating lyric display synced to Ch
 
 - Setup: `uv sync` (uv is the only supported tool; there is no `requirements.txt`)
 - Run: `uv run main.py`
+- Logs: written to `log/` as `app_YYYYMMDD_HHMMSS.log` (UTF-8, configured in `config/logging_setup.py`); `log/` is gitignored. When the user reports a bug, ask for the latest log file.
 
 ## Architecture
 

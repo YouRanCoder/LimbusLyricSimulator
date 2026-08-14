@@ -2,8 +2,13 @@ from PyQt5.QtWidgets import QMainWindow, QApplication
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QPainterPath, QTransform
 import random, time, math
+import logging
 from .fading_line import FadingLine
 from core.parser import parse_lrc
+
+logger = logging.getLogger(__name__)
+
+
 class LyricWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -179,6 +184,8 @@ class LyricWindow(QMainWindow):
                     mode, spacing, shake_intensity, shake_speed,
                     fade_speed, rise_speed, glow, glow_color, glow_size, glow_alpha,
                     start_delay=0):
+        logger.info("开始显示歌词：字符数=%d，模式=%s，启动延时=%ds",
+                    len(text), mode, start_delay)
         self.start_delay = start_delay
         if self.start_delay > 0:
             self.full_text = ""; self.char_index = 0
@@ -208,11 +215,13 @@ class LyricWindow(QMainWindow):
         self.glow_size = glow_size; self.glow_alpha = glow_alpha
         self.lyric_timeline = parse_lrc(text); self.fading_lines = []
         if not self.lyric_timeline:
+            logger.info("未解析到时间轴，按纯文本逐字播放")
             self.wrapped_lines = self.wrap_text(text, self._get_max_text_width())
             self.full_text = text; self.char_index = 0
             self.init_char_shakes(); self.place_randomly()
             self.char_timer.start(50); self.shake_timer.start(self.shake_speed)
             return
+        logger.info("歌词时间轴已就绪：共 %d 句", len(self.lyric_timeline))
         self.current_line = 0; self.char_index = 0; self.full_text = ""
         self.wrapped_lines = []
         self.update(); self.start_time = 0; self.line_timer.start(50)
@@ -427,6 +436,8 @@ class LyricWindow(QMainWindow):
         # 在 _last_external_time 更新前检测回落（seek/单曲循环），旧值仍可用
         if (self._last_external_time is not None and
                 ms < self._last_external_time - 500):
+            logger.debug("检测到外部进度回落：%dms -> %dms（seek/循环），重新定位",
+                         self._last_external_time, ms)
             self.fading_lines = []
             self._progress_rewound = True
         else:
@@ -461,6 +472,7 @@ class LyricWindow(QMainWindow):
         self.update()
 
     def stop_lyric(self):
+        logger.info("停止歌词显示")
         self.char_timer.stop(); self.shake_timer.stop(); self.line_timer.stop()
         self.full_text = ""; self.char_index = 0
         self.lyric_timeline = []; self.current_line = 0
@@ -475,6 +487,7 @@ class LyricWindow(QMainWindow):
         """暂停歌词播放：不再显示下一句，但保留颤动等动画效果持续播放。"""
         if not self.full_text and not self.lyric_timeline:
             return
+        logger.debug("暂停歌词播放")
         self._pause_requested = True
         # 立即停止行推进，不再显示下一句
         self.line_timer.stop()
@@ -487,6 +500,7 @@ class LyricWindow(QMainWindow):
 
     def resume_lyric(self):
         """恢复歌词播放：从暂停位置继续，不跳歌。"""
+        logger.debug("恢复歌词播放")
         if self._paused_at is not None:
             # 把暂停时长补偿进 start_time，避免恢复后歌词时间瞬间跳变
             self.start_time += time.time() * 1000 - self._paused_at

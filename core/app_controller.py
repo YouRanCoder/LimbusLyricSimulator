@@ -130,20 +130,23 @@ class AppController(QObject):
     
     def switch_player(self, player_name: str) -> None:
         """切换播放器"""
+        logger.info("切换播放器：%s", player_name)
         self.player_manager.switch_player(player_name)
         # 更新歌词服务的 fetcher 引用
         if self.lyric_service:
             self.lyric_service.fetcher = self.player_manager.current_fetcher
         self.player_manager.start_current()
-        logging.debug(f"状态：已切换到播放器 {player_name}")
+        logger.info("已切换到播放器 %s", player_name)
         self.status_changed.emit(f"状态：已切换到播放器 {player_name}")
     
     def start_player_listener(self) -> None:
         """启动播放器监听（需在主事件循环中调用）"""
+        logger.info("启动播放器监听")
         self.player_manager.start_current()
     
     def stop_player_listener(self) -> None:
         """停止播放器监听"""
+        logger.info("停止播放器监听")
         self.player_manager.stop_current()
     
     @qasync.asyncSlot()
@@ -159,9 +162,11 @@ class AppController(QObject):
         self.status_changed.emit("状态：正在获取当前播放...")
         
         if not self.lyric_service:
+            logger.error("歌词服务未初始化，无法获取歌词")
             self.lyric_fetch_failed.emit("歌词服务未初始化")
             return
         
+        logger.info("开始获取歌词：来源=%s，仅翻译=%s", source, trans_only)
         result = await self.lyric_service.fetch_lyric_with_fallback(
             source=source,
             trans_only=trans_only,
@@ -169,12 +174,15 @@ class AppController(QObject):
         )
         
         if result.success:
+            logger.info("歌词获取成功：%s - %s，时长 %dms", result.song, result.artist, result.duration_ms)
             self.lyric_fetched.emit(result.lyric, result.duration_ms, result.song, result.artist)
             self.status_changed.emit(f"状态：已获取「{result.song}」的歌词")
         else:
             if not result.song and not result.artist:
+                logger.info("歌词获取已取消")
                 self.status_changed.emit("状态：已取消")
             else:
+                logger.warning("未找到歌词：%s - %s", result.song, result.artist)
                 self.lyric_fetch_failed.emit("未找到歌词，请尝试换源")
                 self.status_changed.emit("状态：未找到歌词，请尝试换源")
     
@@ -187,6 +195,7 @@ class AppController(QObject):
             self.player_list_updated.emit(self.settings.get_player_names())
             self.status_changed.emit(f"状态：已添加播放器 {name}")
         else:
+            logger.warning("添加播放器 %s 失败：已存在", name)
             self.status_changed.emit("状态：该播放器已存在")
         return success
     
@@ -200,8 +209,10 @@ class AppController(QObject):
             self.status_changed.emit(f"状态：已删除播放器 {name}")
         else:
             if len(self.settings.get_players()) <= 1:
+                logger.warning("删除播放器 %s 失败：至少保留一个", name)
                 self.status_changed.emit("状态：至少保留一个播放器")
             else:
+                logger.warning("删除播放器 %s 失败：不存在", name)
                 self.status_changed.emit("状态：播放器不存在")
         return success
     
@@ -212,6 +223,7 @@ class AppController(QObject):
             self.preset_list_updated.emit(self.settings.get_preset_names())
             self.status_changed.emit(f"状态：已创建预设 {name}")
         else:
+            logger.warning("创建预设 %s 失败：已存在", name)
             self.status_changed.emit("状态：该预设名称已存在")
         return success
     
@@ -223,8 +235,10 @@ class AppController(QObject):
             self.status_changed.emit(f"状态：已删除预设 {name}")
         else:
             if len(self.settings.get_presets()) <= 1:
+                logger.warning("删除预设 %s 失败：至少保留一个", name)
                 self.status_changed.emit("状态：至少保留一个预设")
             else:
+                logger.warning("删除预设 %s 失败：不存在", name)
                 self.status_changed.emit("状态：预设不存在")
         return success
     
@@ -266,6 +280,8 @@ class AppController(QObject):
             logger.warning("歌词窗口未初始化")
             return
         
+        logger.info("开始播放歌词：模式=%s，字符数=%d，循环=%s",
+                    lyric_settings.mode, len(lyric_settings.text), lyric_settings.loop)
         self._lyric_window.loop = lyric_settings.loop
         # 应用歌词起始位置范围
         self._lyric_window.pos_x_min = lyric_settings.pos_x_min
@@ -301,6 +317,7 @@ class AppController(QObject):
     
     def stop_playback(self) -> None:
         """停止播放歌词"""
+        logger.info("停止播放歌词")
         self._stop_progress_sync()
         if self._lyric_window:
             self._lyric_window.stop_lyric()
@@ -310,8 +327,10 @@ class AppController(QObject):
         """开始轮询播放器真实进度（仅当当前 Fetcher 支持进度查询）"""
         fetcher = self.player_manager.current_fetcher
         if fetcher is not None and fetcher.supports(Fetcher.CAP_PROGRESS):
+            logger.debug("当前 Fetcher 支持进度查询，启动进度轮询")
             self._progress_timer.start()
         else:
+            logger.debug("当前 Fetcher 不支持进度查询，使用内部计时")
             self._progress_timer.stop()
 
     def _stop_progress_sync(self) -> None:
@@ -336,12 +355,14 @@ class AppController(QObject):
     def pause_playback(self) -> None:
         """暂停歌词播放：定格当前画面，不销毁歌词窗口"""
         if self._lyric_window:
+            logger.info("暂停歌词播放")
             self._lyric_window.pause_lyric()
             self.status_changed.emit("状态：已暂停")
 
     def resume_playback(self) -> None:
         """恢复歌词播放：从暂停位置继续"""
         if self._lyric_window:
+            logger.info("恢复歌词播放")
             self._lyric_window.resume_lyric()
             self.status_changed.emit("状态：已恢复")
     

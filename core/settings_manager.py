@@ -8,8 +8,11 @@
 import os
 import json
 from typing import Dict, Any, Optional
+from logging import getLogger
 from config.manage import load_all_config, save_all_config, DEFAULT_PLAYERS
 from config.settings import DEFAULT_PRESETS
+
+logger = getLogger(__name__)
 
 
 class SettingsManager:
@@ -36,10 +39,15 @@ class SettingsManager:
         self._presets = data.get('presets', dict(DEFAULT_PRESETS))
         self._players = data.get('players', dict(DEFAULT_PLAYERS))
         self._loaded = True
+        logger.info(
+            "配置加载完成：settings=%d 项, presets=%d 个, players=%d 个",
+            len(self._settings), len(self._presets), len(self._players),
+        )
     
     def save(self) -> None:
         """保存当前配置到文件"""
         save_all_config(self._settings, self._presets, self._players)
+        logger.info("配置已保存")
     
     # ---- Settings 读写 ----
     
@@ -77,8 +85,10 @@ class SettingsManager:
             bool: 是否添加成功（名称不重复）
         """
         if name in self._presets:
+            logger.warning("预设 %s 已存在，添加失败", name)
             return False
         self._presets[name] = preset_data
+        logger.info("已添加预设 %s", name)
         return True
     
     def delete_preset(self, name: str) -> bool:
@@ -90,7 +100,9 @@ class SettingsManager:
         """
         if name in self._presets and len(self._presets) > 1:
             del self._presets[name]
+            logger.info("已删除预设 %s", name)
             return True
+        logger.warning("删除预设 %s 失败（不存在或为最后一个预设）", name)
         return False
     
     def get_preset_names(self) -> list:
@@ -111,11 +123,13 @@ class SettingsManager:
             bool: 是否添加成功（名称不重复）
         """
         if name in self._players:
+            logger.warning("播放器 %s 已存在，添加失败", name)
             return False
         self._players[name] = {
             "process": process,
             "pattern": pattern
         }
+        logger.info("已添加播放器 %s（进程 %s）", name, process)
         return True
     
     def delete_player(self, name: str) -> bool:
@@ -127,7 +141,9 @@ class SettingsManager:
         """
         if name in self._players and len(self._players) > 1:
             del self._players[name]
+            logger.info("已删除播放器 %s", name)
             return True
+        logger.warning("删除播放器 %s 失败（不存在或为最后一个播放器）", name)
         return False
     
     def get_player_names(self) -> list:
