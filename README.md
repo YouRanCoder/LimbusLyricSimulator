@@ -1,6 +1,6 @@
 # LimbusLyricSimulator
 
-*项目灵感来源：[Limbus-Like-Lyric-Simulator](https://github.com/TempuraYMY0728/Limbus-Like-Lyric-Simulator)在此感谢[Tempura3](https://space.bilibili.com/3546955957406045)大佬开源的歌词显示方案***
+*项目灵感来源：[Limbus-Like-Lyric-Simulator](https://github.com/TempuraYMY0728/Limbus-Like-Lyric-Simulator)在此感谢[Tempura3](https://space.bilibili.com/3546955957406045)大佬开源的歌词显示方案*
 
 # 使用说明
 
