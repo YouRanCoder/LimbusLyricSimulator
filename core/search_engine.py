@@ -1,15 +1,24 @@
-import requests, urllib.parse, base64
+import urllib.parse, base64
+import httpx
 class LyricSearchEngine:
     HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
 
-    @staticmethod
-    def search_netease(song_name, artist=""):
+    @classmethod
+    async def _get(cls, url: str, headers=None) -> httpx.Response:
+        """异步 GET 请求（每次请求独立客户端，退出时无需显式清理）"""
+        async with httpx.AsyncClient(
+            headers=cls.HEADERS, timeout=5, follow_redirects=True
+        ) as client:
+            return await client.get(url, headers=headers)
+
+    @classmethod
+    async def search_netease(cls, song_name, artist=""):
         try:
             keyword = f"{song_name} {artist}".strip()
             url = f"http://music.163.com/api/search/get?s={urllib.parse.quote(keyword)}&type=1&limit=1"
-            resp = requests.get(url, headers=LyricSearchEngine.HEADERS, timeout=5)
+            resp = await cls._get(url)
             data = resp.json()
             songs = data.get('result', {}).get('songs', [])
             if songs:
@@ -17,22 +26,22 @@ class LyricSearchEngine:
                 song_id = song['id']
                 duration = song.get('duration', 0)
                 lyric_url = f"http://music.163.com/api/song/lyric?id={song_id}&lv=1&kv=1&tv=-1"
-                lrc_resp = requests.get(lyric_url, headers=LyricSearchEngine.HEADERS, timeout=5)
+                lrc_resp = await cls._get(lyric_url)
                 lrc_data = lrc_resp.json()
                 lrc = lrc_data.get('lrc', {}).get('lyric', '')
                 tlyric = lrc_data.get('tlyric', {}).get('lyric', '')
                 return lrc, tlyric, duration
             return None, None, 0
-        except:
+        except Exception:
             return None, None, 0
 
-    @staticmethod
-    def search_qq(song_name, artist=""):
+    @classmethod
+    async def search_qq(cls, song_name, artist=""):
         try:
             keyword = f"{song_name} {artist}".strip()
             search_url = f"https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=1&w={urllib.parse.quote(keyword)}&format=json"
-            headers = {**LyricSearchEngine.HEADERS, 'Referer': 'https://y.qq.com/'}
-            resp = requests.get(search_url, headers=headers, timeout=5)
+            headers = {**cls.HEADERS, 'Referer': 'https://y.qq.com/'}
+            resp = await cls._get(search_url, headers=headers)
             data = resp.json()
             songs = data.get('data', {}).get('song', {}).get('list', [])
             if songs:
@@ -40,7 +49,7 @@ class LyricSearchEngine:
                 songmid = song.get('songmid')
                 duration = song.get('interval', 0) * 1000
                 lyric_url = f"https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={songmid}&format=json&nobase64=1"
-                lrc_resp = requests.get(lyric_url, headers=headers, timeout=5)
+                lrc_resp = await cls._get(lyric_url, headers=headers)
                 lrc_data = lrc_resp.json()
                 lyric = lrc_data.get('lyric', '')
                 if lyric:
@@ -50,15 +59,15 @@ class LyricSearchEngine:
                     lyric = None
                 return lyric, None, duration
             return None, None, 0
-        except:
+        except Exception:
             return None, None, 0
 
-    @staticmethod
-    def search_kugou(song_name, artist=""):
+    @classmethod
+    async def search_kugou(cls, song_name, artist=""):
         try:
             keyword = f"{song_name} {artist}".strip()
             search_url = f"http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword={urllib.parse.quote(keyword)}&page=1&pagesize=1"
-            resp = requests.get(search_url, headers=LyricSearchEngine.HEADERS, timeout=5)
+            resp = await cls._get(search_url)
             data = resp.json()
             songs = data.get('data', {}).get('info', [])
             if songs:
@@ -66,22 +75,22 @@ class LyricSearchEngine:
                 song_hash = song.get('hash')
                 duration = song.get('duration', 0) * 1000
                 lyric_url = f"http://m.kugou.com/app/i/krc.php?cmd=100&hash={song_hash}&timelength=999999"
-                lrc_resp = requests.get(lyric_url, headers=LyricSearchEngine.HEADERS, timeout=5)
+                lrc_resp = await cls._get(lyric_url)
                 lyric = lrc_resp.text
                 if lyric and 'krc' not in lyric and lyric.strip():
                     return lyric, None, duration
             return None, None, 0
-        except:
+        except Exception:
             return None, None, 0
 
-    @staticmethod
-    def search(song_name, artist="", source="网易云", trans_only=False):
+    @classmethod
+    async def search(cls, song_name, artist="", source="网易云", trans_only=False):
         if source == "网易云":
-            lrc, tlyric, duration = LyricSearchEngine.search_netease(song_name, artist)
+            lrc, tlyric, duration = await cls.search_netease(song_name, artist)
         elif source == "QQ音乐":
-            lrc, tlyric, duration = LyricSearchEngine.search_qq(song_name, artist)
+            lrc, tlyric, duration = await cls.search_qq(song_name, artist)
         elif source == "酷狗":
-            lrc, tlyric, duration = LyricSearchEngine.search_kugou(song_name, artist)
+            lrc, tlyric, duration = await cls.search_kugou(song_name, artist)
         else:
             return None, 0
 

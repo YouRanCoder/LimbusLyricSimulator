@@ -59,7 +59,7 @@ class LyricService:
         """
         return self.fetcher.get_current_media()
     
-    def search_lyric(
+    async def search_lyric(
         self, 
         song: str, 
         artist: str, 
@@ -67,7 +67,7 @@ class LyricService:
         trans_only: bool = False
     ) -> Tuple[Optional[str], int]:
         """
-        从指定歌词源搜索歌词
+        从指定歌词源异步搜索歌词
         
         Args:
             song: 歌曲名称
@@ -78,16 +78,16 @@ class LyricService:
         Returns:
             Tuple[Optional[str], int]: (歌词文本, 时长毫秒)
         """
-        return LyricSearchEngine.search(song, artist, source, trans_only)
+        return await LyricSearchEngine.search(song, artist, source, trans_only)
     
-    def fetch_lyric_with_fallback(
+    async def fetch_lyric_with_fallback(
         self,
         source: str,
         trans_only: bool,
         manual_input_callback=None
     ) -> LyricResult:
         """
-        获取当前播放的歌词，支持手动输入兜底
+        异步获取当前播放的歌词，支持手动输入兜底
         
         流程：
         1. 尝试从播放器获取当前歌曲信息
@@ -120,7 +120,7 @@ class LyricService:
                 return LyricResult()
         
         # 3. 搜索歌词
-        lyric, duration = self.search_lyric(song, artist, source, trans_only)
+        lyric, duration = await self.search_lyric(song, artist, source, trans_only)
         
         # 4. 构建结果
         # 优先使用播放器上报的真实时长，否则用搜索接口返回的时长

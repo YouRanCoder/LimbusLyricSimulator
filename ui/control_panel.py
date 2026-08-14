@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QFont
+import qasync
 from core.app_controller import AppController, LyricSettings
 import logging
 
@@ -753,7 +754,8 @@ class ControlPanel(QWidget):
         """恢复播放：从暂停位置继续"""
         self.controller.resume_playback()
     
-    def _on_song_updated(self) -> None:
+    @qasync.asyncSlot()
+    async def _on_song_updated(self) -> None:
         """切歌后自动重新播放"""
         logger.debug("自动播放触发，重新开始")
         source = self.source_combo.currentText()
@@ -762,7 +764,7 @@ class ControlPanel(QWidget):
         def manual_input():
             logger.error("自动播放时未能获取歌曲信息")
             return None
-        self.controller.fetch_lyric(source, trans_only, manual_input)
+        await self.controller.fetch_lyric(source, trans_only, manual_input)
         self._on_stop()
         self._on_start()
     def _on_playback_status_updated(self, status: bool) -> None:

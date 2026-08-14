@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Optional, Callable, Dict, Any
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor, QFont
+import qasync
 from core.player_manager import PlayerManager
 from core.lyric_service import LyricService, LyricResult
 from core.settings_manager import SettingsManager
@@ -145,9 +146,10 @@ class AppController(QObject):
         """停止播放器监听"""
         self.player_manager.stop_current()
     
-    def fetch_lyric(self, source: str, trans_only: bool, manual_input_callback=None) -> None:
+    @qasync.asyncSlot()
+    async def fetch_lyric(self, source: str, trans_only: bool, manual_input_callback=None) -> None:
         """
-        获取歌词
+        异步获取歌词（不会阻塞事件循环）
         
         Args:
             source: 歌词源
@@ -160,7 +162,7 @@ class AppController(QObject):
             self.lyric_fetch_failed.emit("歌词服务未初始化")
             return
         
-        result = self.lyric_service.fetch_lyric_with_fallback(
+        result = await self.lyric_service.fetch_lyric_with_fallback(
             source=source,
             trans_only=trans_only,
             manual_input_callback=manual_input_callback
