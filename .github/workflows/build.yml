@@ -33,8 +33,7 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item -LiteralPath "lyric_config.json" -Destination "dist\lyric_config.json" -Force
-          New-Item -ItemType Directory -Force -Path "dist\assets" | Out-Null
-          Copy-Item -LiteralPath "assets\*.otf" -Destination "dist\assets" -Force
+          Copy-Item -LiteralPath "assets" -Destination "dist" -Recurse -Force
 
       - name: 打 zip 包
         shell: pwsh
