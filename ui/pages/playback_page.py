@@ -29,12 +29,14 @@ class PlaybackPage:
         # ---- 播放器与歌词源 ----
         self.player_combo = ComboBox()
         self.btn_add_p = PushButton(FluentIcon.ADD, "")
+        self.btn_edit_p = PushButton(FluentIcon.EDIT, "")
         self.btn_del_p = PushButton(FluentIcon.REMOVE, "")
         self.source_combo = ComboBox()
         self.source_combo.addItems(["网易云", "QQ音乐", "酷狗"])
 
         player_card = widget_card(FluentIcon.WIFI, "播放器", self.player_combo)
         player_card.hBoxLayout.addWidget(self.btn_add_p)
+        player_card.hBoxLayout.addWidget(self.btn_edit_p)
         player_card.hBoxLayout.addWidget(self.btn_del_p)
 
         netease_card, self.netease_adapter_check = switch_card(

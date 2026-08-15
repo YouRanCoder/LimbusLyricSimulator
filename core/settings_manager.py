@@ -115,7 +115,7 @@ class SettingsManager:
         """获取所有播放器配置"""
         return dict(self._players)
     
-    def add_player(self, name: str, process: str) -> bool:
+    def add_player(self, name: str, process: str, support_progress: bool = True) -> bool:
         """
         添加播放器配置
         
@@ -126,9 +126,33 @@ class SettingsManager:
             logger.warning("播放器 %s 已存在，添加失败", name)
             return False
         self._players[name] = {
-            "process": process
+            "process": process,
+            "support_progress": support_progress,
         }
-        logger.info("已添加播放器 %s（进程 %s）", name, process)
+        logger.info("已添加播放器 %s（进程 %s，进度支持 %s）", name, process, support_progress)
+        return True
+    
+    def update_player(self, name: str, new_name: str, process: str,
+                      support_progress: bool = True) -> bool:
+        """
+        修改播放器配置（支持重命名、重新绑定会话、调整是否支持同步进度）
+        
+        Returns:
+            bool: 是否修改成功（不存在或新名称被占用时失败）
+        """
+        if name not in self._players:
+            logger.warning("修改播放器 %s 失败：不存在", name)
+            return False
+        if new_name != name and new_name in self._players:
+            logger.warning("修改播放器 %s 失败：新名称 %s 已存在", name, new_name)
+            return False
+        self._players.pop(name)
+        self._players[new_name] = {
+            "process": process,
+            "support_progress": support_progress,
+        }
+        logger.info("已修改播放器 %s -> %s（进程 %s，进度支持 %s）",
+                    name, new_name, process, support_progress)
         return True
     
     def delete_player(self, name: str) -> bool:

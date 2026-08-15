@@ -22,7 +22,7 @@
     "max_duration": 4000,
     "angle_min": -10,
     "angle_max": 10,
-    "player": "KoeMoe",
+    "player": "网易云音乐",
     "netease_adapter_enabled": true,
     "filter_pure_music": true,
     "inst_patterns": [
@@ -130,10 +130,6 @@
     },
     "QQ音乐": {
       "process": "qqmusic"
-    },
-    "KoeMoe": {
-      "process": "cn.MoeKoe.Music",
-      "pattern": "^(.+?)\\s*-\\s*(.+)$"
     }
   }
 }

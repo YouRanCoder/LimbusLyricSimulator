@@ -14,7 +14,7 @@ import logging
 
 from PyQt5.QtCore import QTimer
 from PyQt5.QtGui import QColor, QFont, QFontDatabase
-from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PyQt5.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon
 
 from qfluentwidgets import (
     FluentIcon,
@@ -26,7 +26,7 @@ import qasync
 from core.app_controller import AppController, LyricSettings
 from core.autostart import is_autostart_enabled, set_autostart
 from core.fetcher import is_pure_music
-from ui.dialogs import ask_select, ask_text, confirm, warn
+from ui.dialogs import PlayerConfigDialog, ask_text, confirm, warn
 from ui.pages import AnimationPage, AppearancePage, PlaybackPage, TimelinePage
 
 
@@ -229,6 +229,7 @@ class ControlPanel(FluentWindow):
         # 播放器切换
         p.player_combo.currentTextChanged.connect(self.controller.switch_player)
         p.btn_add_p.clicked.connect(self._on_add_player)
+        p.btn_edit_p.clicked.connect(self._on_edit_player)
         p.btn_del_p.clicked.connect(self._on_delete_player)
 
         # 开始停止 / 重新获取
@@ -435,16 +436,48 @@ class ControlPanel(FluentWindow):
             warn(self, "没有可用的播放器",
                  "未检测到正在播放的 SMTC 会话。\n请先打开目标音乐软件并开始播放，再重试。")
             return
-        aumid = ask_select(self, "选择要添加的播放器", sessions)
-        if not aumid:
+        dialog = PlayerConfigDialog("添加播放器", sessions, parent=self)
+        if dialog.exec() != QDialog.Accepted:
             return
-        name = ask_text(self, "播放器名称", "输入播放器显示名称：")
+        cfg = dialog.values()
+        if not cfg["name"] or not cfg["process"]:
+            return
+        logger.info("添加播放器：%s（SMTC %s，进度支持 %s）",
+                    cfg["name"], cfg["process"], cfg["support_progress"])
+        self.controller.add_player(cfg["name"], cfg["process"], cfg["support_progress"])
+        self._refresh_player_list()
+        self._playback.player_combo.setCurrentText(cfg["name"])
+
+    @qasync.asyncSlot()
+    async def _on_edit_player(self) -> None:
+        """修改播放器配置：重新筛选 SMTC 会话、调整是否支持同步进度"""
+        name = self._playback.player_combo.currentText()
         if not name:
             return
-        logger.info("添加播放器：%s（SMTC %s）", name, aumid)
-        self.controller.add_player(name, aumid)
+        cfg = self.controller.get_players_config().get(name)
+        if not cfg:
+            return
+        logger.info("用户点击修改播放器：%s", name)
+        sessions = await self.controller.list_all_smtc_sessions()
+        dialog = PlayerConfigDialog(
+            "修改播放器配置", sessions,
+            default_name=name,
+            default_process=cfg.get("process", ""),
+            support_progress=cfg.get("support_progress", True),
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        values = dialog.values()
+        new_name = values["name"] or name
+        if not values["process"]:
+            return
+        logger.info("修改播放器：%s -> %s（SMTC %s，进度支持 %s）",
+                    name, new_name, values["process"], values["support_progress"])
+        self.controller.update_player(
+            name, new_name, values["process"], values["support_progress"])
         self._refresh_player_list()
-        self._playback.player_combo.setCurrentText(name)
+        self._playback.player_combo.setCurrentText(new_name)
 
     def _on_delete_player(self) -> None:
         """删除播放器"""

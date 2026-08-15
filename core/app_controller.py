@@ -224,9 +224,16 @@ class AppController(QObject):
         return [aumid for aumid in available
                 if not any(proc and proc in aumid.lower() for proc in configured)]
 
-    def add_player(self, name: str, process: str) -> bool:
+    @qasync.asyncSlot()
+    async def list_all_smtc_sessions(self) -> list:
+        """枚举当前所有 SMTC 会话（不排除已配置的播放器），供修改播放器时重新筛选"""
+        from core.fetcher import list_smtc_sessions as _list_smtc_sessions
+        return await _list_smtc_sessions()
+
+    def add_player(self, name: str, process: str,
+                   support_progress: bool = True) -> bool:
         """添加播放器配置"""
-        success = self.settings.add_player(name, process)
+        success = self.settings.add_player(name, process, support_progress)
         if success:
             # 同步到 PlayerManager
             self.player_manager.players_config = self.settings.get_players()
@@ -236,6 +243,34 @@ class AppController(QObject):
             logger.warning("添加播放器 %s 失败：已存在", name)
             self.status_changed.emit("状态：该播放器已存在")
         return success
+
+    def update_player(self, name: str, new_name: str, process: str,
+                      support_progress: bool = True) -> bool:
+        """修改播放器配置（可重命名、重新绑定会话、调整是否支持同步进度）"""
+        if name not in self.settings.get_players():
+            logger.warning("修改播放器 %s 失败：不存在", name)
+            self.status_changed.emit("状态：播放器不存在")
+            return False
+        success = self.settings.update_player(name, new_name, process, support_progress)
+        if not success:
+            logger.warning("修改播放器 %s 失败：新名称 %s 已存在", name, new_name)
+            self.status_changed.emit("状态：该名称已被使用")
+            return False
+        # 同步到 PlayerManager
+        self.player_manager.players_config = self.settings.get_players()
+        # 若修改的是当前播放器，重建 fetcher 以套用新会话/名称/进度设置
+        if name == self.player_manager.current_player_name:
+            if new_name != name:
+                self.settings.set_setting('player', new_name)
+            netease_adapter = self.settings.get_setting('netease_adapter_enabled', True)
+            self.player_manager.switch_player(new_name, netease_adapter=netease_adapter, force=True)
+            # 更新歌词服务的 fetcher 引用
+            if self.lyric_service:
+                self.lyric_service.fetcher = self.player_manager.current_fetcher
+            self.player_manager.start_current()
+        self.player_list_updated.emit(self.settings.get_player_names())
+        self.status_changed.emit(f"状态：已修改播放器 {new_name}")
+        return True
     
     def delete_player(self, name: str) -> bool:
         """删除播放器配置"""
