@@ -91,7 +91,7 @@ class Fetcher(ABC):
         Args:
             player_name: 播放器名称
             callback: 媒体变化回调函数，签名为 callback(change: MediaChange)
-            settings: 播放器配置字典，格式为 {process: 进程名, pattern: 正则}
+            settings: 播放器配置字典，格式为 {process: SMTC 会话标识}
         """
         self.player_name: str = player_name
         self.callback = callback
@@ -533,6 +533,22 @@ def select_fetcher(player_name: str, callback: callable = None, settings: Dict =
         return FetcherBySMTC(player_name, callback, settings)
 
 
+async def list_smtc_sessions() -> list:
+    """枚举当前系统 SMTC 会话，返回各会话的 source_app_user_model_id 列表。
+
+    供添加播放器时从活跃会话中选择使用；无会话或读取失败时返回空列表。
+    """
+    try:
+        manager: GlobalSystemMediaTransportControlsSessionManager = (
+            await GlobalSystemMediaTransportControlsSessionManager.request_async()
+        )
+        sessions = list(manager.get_sessions())
+        return [s.source_app_user_model_id for s in sessions if s.source_app_user_model_id]
+    except Exception:
+        logger.debug("枚举 SMTC 会话失败", exc_info=True)
+        return []
+
+
 @lru_cache(maxsize=16)
 def _compile_inst_regex(patterns_tuple) -> "re.Pattern":
     return re.compile("|".join(patterns_tuple), re.IGNORECASE)
@@ -556,5 +572,6 @@ __ALL__ = [
     "FetcherBySMTC",
     "FetcherByCMLog",
     "select_fetcher",
+    "list_smtc_sessions",
     "is_pure_music",
 ]

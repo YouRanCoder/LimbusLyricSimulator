@@ -34,7 +34,7 @@ class PlayerManager:
         初始化播放器管理器
         
         Args:
-            players_config: 播放器配置字典，格式为 {播放器名称: {process: 进程名, pattern: 正则}}
+            players_config: 播放器配置字典，格式为 {播放器名称: {process: SMTC 会话标识}}
             media_changed_callback: 媒体变化回调函数，签名为 callback(change: MediaChange)
         """
         self.players_config = players_config
@@ -101,18 +101,16 @@ class PlayerManager:
             return MediaInfo()
         return self._current_fetcher.get_current_media()
     
-    def add_player(self, name: str, process: str, pattern: str) -> None:
+    def add_player(self, name: str, process: str) -> None:
         """
         添加自定义播放器配置
         
         Args:
             name: 播放器名称
-            process: 进程名（如 qqmusic.exe）
-            pattern: 标题匹配正则
+            process: SMTC 会话标识（如 kugou）
         """
         self.players_config[name] = {
-            "process": process,
-            "pattern": pattern
+            "process": process
         }
     
     def delete_player(self, name: str) -> bool:

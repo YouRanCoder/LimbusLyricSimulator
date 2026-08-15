@@ -3,6 +3,7 @@
 from PyQt5.QtWidgets import QDialog
 
 from qfluentwidgets import (
+    ComboBox,
     LineEdit,
     MessageBox,
     MessageBoxBase,
@@ -35,6 +36,37 @@ def ask_text(parent, title: str, placeholder: str = "",
              default: str = "") -> str:
     """弹出文本输入框，返回输入内容（取消返回空字符串）"""
     dialog = TextInputDialog(title, placeholder, default, parent)
+    if dialog.exec() == QDialog.Accepted:
+        return dialog.value()
+    return ""
+
+
+class SelectDialog(MessageBoxBase):
+    """下拉选择对话框"""
+
+    def __init__(self, title: str, items: list, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel(title, self)
+        self.combo = ComboBox(self)
+        self.combo.addItems(items)
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.combo)
+
+        self.yesButton.setText("确定")
+        self.cancelButton.setText("取消")
+        self.widget.setMinimumWidth(360)
+        if items:
+            self.combo.setCurrentIndex(0)
+        else:
+            self.yesButton.setEnabled(False)
+
+    def value(self) -> str:
+        return self.combo.currentText()
+
+
+def ask_select(parent, title: str, items: list) -> str:
+    """弹出下拉选择框，返回选中的项（取消返回空字符串）"""
+    dialog = SelectDialog(title, items, parent)
     if dialog.exec() == QDialog.Accepted:
         return dialog.value()
     return ""

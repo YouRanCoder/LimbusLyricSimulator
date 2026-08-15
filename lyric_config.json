@@ -22,7 +22,7 @@
     "max_duration": 4000,
     "angle_min": -10,
     "angle_max": 10,
-    "player": "QQ音乐",
+    "player": "KoeMoe",
     "netease_adapter_enabled": true,
     "filter_pure_music": true,
     "inst_patterns": [
@@ -39,7 +39,7 @@
       "カラオケ",
       "karaoke"
     ],
-    "source": "QQ音乐",
+    "source": "网易云",
     "delay": 0,
     "perspective_enabled": true,
     "persp_x_strength": 10,
@@ -122,16 +122,18 @@
   },
   "players": {
     "网易云音乐": {
-      "process": "cloudmusic.exe",
-      "pattern": "^(.+)\\s*-\\s*(.+?)$"
+      "process": "cloudmusic"
     },
     "酷狗音乐": {
-      "process": "kgmusic.exe",
-      "pattern": "^(.+)\\s*-\\s*(.+?)$"
+      "process": "kugou",
+      "support_progress": false
     },
     "QQ音乐": {
-      "process": "QQMusic.exe",
-      "pattern": "^(.+)\\s*-\\s*(.+?)\\s*-\\s*QQ音乐$"
+      "process": "qqmusic"
+    },
+    "KoeMoe": {
+      "process": "cn.MoeKoe.Music",
+      "pattern": "^(.+?)\\s*-\\s*(.+)$"
     }
   }
 }

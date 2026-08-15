@@ -115,7 +115,7 @@ class SettingsManager:
         """获取所有播放器配置"""
         return dict(self._players)
     
-    def add_player(self, name: str, process: str, pattern: str) -> bool:
+    def add_player(self, name: str, process: str) -> bool:
         """
         添加播放器配置
         
@@ -126,8 +126,7 @@ class SettingsManager:
             logger.warning("播放器 %s 已存在，添加失败", name)
             return False
         self._players[name] = {
-            "process": process,
-            "pattern": pattern
+            "process": process
         }
         logger.info("已添加播放器 %s（进程 %s）", name, process)
         return True

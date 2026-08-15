@@ -26,7 +26,7 @@ import qasync
 from core.app_controller import AppController, LyricSettings
 from core.autostart import is_autostart_enabled, set_autostart
 from core.fetcher import is_pure_music
-from ui.dialogs import ask_text, confirm, warn
+from ui.dialogs import ask_select, ask_text, confirm, warn
 from ui.pages import AnimationPage, AppearancePage, PlaybackPage, TimelinePage
 
 
@@ -220,6 +220,7 @@ class ControlPanel(FluentWindow):
         self.controller.preset_list_updated.connect(self._on_preset_list_updated)
         self.controller.song_updated.connect(self._on_song_updated)
         self.controller.playback_status_updated.connect(self._on_playback_status_updated)
+        self.controller.progress_unsupported_warning.connect(self._on_progress_unsupported_warning)
 
     def _connect_ui_events(self) -> None:
         """连接 UI 控件事件到 Controller 方法"""
@@ -425,21 +426,25 @@ class ControlPanel(FluentWindow):
         logger.info("切换仅获取翻译歌词，重新获取并播放")
         await self._fetch_and_restart(self._make_manual_input())
 
-    def _on_add_player(self) -> None:
-        """添加播放器"""
-        name = ask_text(self, "自定义播放器", "输入播放器名称：")
+    @qasync.asyncSlot()
+    async def _on_add_player(self) -> None:
+        """从当前 SMTC 会话中选择添加播放器（已配置的播放器不会出现）"""
+        logger.info("用户点击添加播放器")
+        sessions = await self.controller.list_smtc_sessions()
+        if not sessions:
+            warn(self, "没有可用的播放器",
+                 "未检测到正在播放的 SMTC 会话。\n请先打开目标音乐软件并开始播放，再重试。")
+            return
+        aumid = ask_select(self, "选择要添加的播放器", sessions)
+        if not aumid:
+            return
+        name = ask_text(self, "播放器名称", "输入播放器显示名称：")
         if not name:
             return
-        proc = ask_text(self, "进程名", "输入进程名（如 qqmusic.exe）：")
-        if not proc:
-            return
-        pattern = ask_text(self, "标题正则", "输入标题匹配正则：",
-                           default=r'^(.+?)\s*-\s*(.+)$')
-        if pattern:
-            logger.info("添加播放器：%s（进程 %s）", name, proc)
-            self.controller.add_player(name, proc, pattern)
-            self._refresh_player_list()
-            self._playback.player_combo.setCurrentText(name)
+        logger.info("添加播放器：%s（SMTC %s）", name, aumid)
+        self.controller.add_player(name, aumid)
+        self._refresh_player_list()
+        self._playback.player_combo.setCurrentText(name)
 
     def _on_delete_player(self) -> None:
         """删除播放器"""
@@ -654,6 +659,11 @@ class ControlPanel(FluentWindow):
     def _on_player_list_updated(self, player_names: list) -> None:
         """播放器列表更新"""
         self._refresh_player_list()
+
+    def _on_progress_unsupported_warning(self, player_name: str) -> None:
+        """播放器不支持进度同步时弹出警告框"""
+        logger.warning("播放器 %s 不支持进度同步，只能从头播放", player_name)
+        warn(self, "不支持进度同步", f"「{player_name}」不支持进度同步，歌词只能从头播放")
 
     def _on_preset_list_updated(self, preset_names: list) -> None:
         """预设列表更新"""

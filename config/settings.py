@@ -9,16 +9,14 @@ CONFIG_FILE = "lyric_config.json"
 
 DEFAULT_PLAYERS = {
     "网易云音乐": {
-        "process": "cloudmusic.exe",
-        "pattern": r'^(.+)\s*-\s*(.+?)$'
+        "process": "cloudmusic",
     },
     "酷狗音乐": {
-        "process": "kgmusic.exe",
-        "pattern": r'^(.+)\s*-\s*(.+?)$'
+        "process": "kugou",
+        "support_progress": False
     },
     "QQ音乐": {
-        "process": "QQMusic.exe",
-        "pattern": r'^(.+)\s*-\s*(.+?)\s*-\s*QQ音乐$'
+        "process": "qqmusic",
     }
 }
 

@@ -87,6 +87,9 @@ class AppController(QObject):
 
     # 歌曲播放/暂停通知
     playback_status_updated = pyqtSignal(bool)  # (is_playing)
+
+    # 播放器不支持进度同步的警告通知（UI 层据此弹出警告框）
+    progress_unsupported_warning = pyqtSignal(str)  # (player_name)
     def __init__(self, settings: Optional[SettingsManager] = None):
         super().__init__()
         
@@ -139,6 +142,9 @@ class AppController(QObject):
         self.player_manager.start_current()
         logger.info("已切换到播放器 %s", player_name)
         self.status_changed.emit(f"状态：已切换到播放器 {player_name}")
+        # 播放器不支持进度同步时提示用户（仅一次，切换时弹出）
+        if not self._player_supports_progress(player_name):
+            self.progress_unsupported_warning.emit(player_name)
     
     def set_netease_adapter(self, enabled: bool) -> None:
         """切换网易云适配方式（勾选=网易云日志适配器，取消=SMTC）"""
@@ -205,9 +211,22 @@ class AppController(QObject):
                 self.status_changed.emit("状态：未找到歌词，请尝试换源")
             return False
     
-    def add_player(self, name: str, process: str, pattern: str) -> bool:
+    @qasync.asyncSlot()
+    async def list_smtc_sessions(self) -> list:
+        """枚举当前 SMTC 会话（排除已配置的播放器），返回可用 AUMID 列表供 UI 选择"""
+        from core.fetcher import list_smtc_sessions as _list_smtc_sessions
+        available = await _list_smtc_sessions()
+        if not available:
+            return []
+        configured = [cfg.get("process", "").lower()
+                      for cfg in self.settings.get_players().values()
+                      if cfg.get("process")]
+        return [aumid for aumid in available
+                if not any(proc and proc in aumid.lower() for proc in configured)]
+
+    def add_player(self, name: str, process: str) -> bool:
         """添加播放器配置"""
-        success = self.settings.add_player(name, process, pattern)
+        success = self.settings.add_player(name, process)
         if success:
             # 同步到 PlayerManager
             self.player_manager.players_config = self.settings.get_players()
@@ -346,10 +365,16 @@ class AppController(QObject):
             self._lyric_window.stop_lyric()
             self.status_changed.emit("状态：已停止")
 
+    def _player_supports_progress(self, player_name: str) -> bool:
+        """判断播放器是否支持进度同步（配置里 support_progress 默认开启）"""
+        return self.settings.get_players().get(player_name, {}).get("support_progress", True)
+
     def _start_progress_sync(self) -> None:
-        """开始轮询播放器真实进度（仅当当前 Fetcher 支持进度查询）"""
+        """开始轮询播放器真实进度（仅当当前 Fetcher 支持且播放器配置允许进度查询）"""
         fetcher = self.player_manager.current_fetcher
-        if fetcher is not None and fetcher.supports(Fetcher.CAP_PROGRESS):
+        player_name = self.player_manager.current_player_name
+        if (fetcher is not None and fetcher.supports(Fetcher.CAP_PROGRESS)
+                and self._player_supports_progress(player_name)):
             logger.debug("当前 Fetcher 支持进度查询，启动进度轮询")
             self._progress_timer.start()
         else:
