@@ -7,7 +7,7 @@
     "glow_size": 13,
     "glow_alpha": 23,
     "loop": false,
-    "trans_only": false,
+    "trans_only": true,
     "mode": "chinese",
     "font_family": "Mikodacs",
     "font_size": 30,

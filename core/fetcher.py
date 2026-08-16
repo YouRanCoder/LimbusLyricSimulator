@@ -493,10 +493,24 @@ class FetcherByCMLog(Fetcher):
         return MediaInfo.from_playing_state(self._cloud_music.state)
 
     def get_progress(self) -> float | None:
-        """返回当前播放进度（秒）。"""
+        """返回当前播放进度（秒）。
+
+        切歌瞬间依赖库尚未收到新的进度/状态事件，会把 position 误报为总时长
+        （其内部 _relative_time 被重置为 0，min((now-0)/1000, duration) 恒等于
+        duration）。此时返回 None 让上层忽略该无效进度，避免歌词闪跳到末尾。
+        """
         if self._cloud_music is None:
             return None
-        return self._cloud_music.state.position
+        state = self._cloud_music.state
+        duration = self._cloud_music.track.duration if self._cloud_music.track else 0
+        if duration > 0 and state.position >= duration:
+            logger.debug(
+                "切歌瞬间进度无效（position=%ss ≈ 总时长=%ss），忽略",
+                state.position,
+                duration,
+            )
+            return None
+        return state.position
 
     def get_duration(self) -> float | None:
         """返回总时长（秒）。"""
