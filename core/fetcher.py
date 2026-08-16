@@ -203,6 +203,10 @@ class FetcherBySMTC(Fetcher):
         self._task = None
         self._is_playing = False
         self._stopped = False
+        # SMTC 事件注册令牌（winrt 的 remove_*_changed 需传入 add_*_changed 返回的 token）
+        self._sessions_token = None
+        self._media_props_token = None
+        self._playback_token = None
 
     # ---- 生命周期 ----
     def start(self) -> None:
@@ -217,14 +221,14 @@ class FetcherBySMTC(Fetcher):
         self._stopped = True
         if self.session is not None:
             try:
-                self.session.remove_media_properties_changed(self.on_media_changed)
-                self.session.remove_playback_info_changed(self.on_playback_changed)
+                self.session.remove_media_properties_changed(self._media_props_token)
+                self.session.remove_playback_info_changed(self._playback_token)
             except Exception:
                 logger.debug("移除 SMTC 事件监听失败", exc_info=True)
         self.session = None
         if self.manager is not None:
             try:
-                self.manager.remove_sessions_changed(self._on_sessions_changed)
+                self.manager.remove_sessions_changed(self._sessions_token)
             except Exception:
                 logger.debug("移除 SMTC 会话变化监听失败", exc_info=True)
         if self._task is not None:
@@ -274,7 +278,7 @@ class FetcherBySMTC(Fetcher):
         )
         # 订阅会话变化事件：播放器后启动/重启时自动补绑定会话
         try:
-            self.manager.add_sessions_changed(self._on_sessions_changed)
+            self._sessions_token = self.manager.add_sessions_changed(self._on_sessions_changed)
         except Exception:
             logger.debug("注册 SMTC 会话变化监听失败", exc_info=True)
         # 先按当前会话快照绑定，未找到时等待 sessions_changed 事件
@@ -308,14 +312,14 @@ class FetcherBySMTC(Fetcher):
         # 解除旧会话监听
         if self.session is not None:
             try:
-                self.session.remove_media_properties_changed(self.on_media_changed)
-                self.session.remove_playback_info_changed(self.on_playback_changed)
+                self.session.remove_media_properties_changed(self._media_props_token)
+                self.session.remove_playback_info_changed(self._playback_token)
             except Exception:
                 logger.debug("移除旧 SMTC 会话监听失败", exc_info=True)
         self.session = matched
         logger.info("SMTC 会话已建立：%s", self.session.source_app_user_model_id)
-        self.session.add_media_properties_changed(self.on_media_changed)
-        self.session.add_playback_info_changed(self.on_playback_changed)
+        self._media_props_token = self.session.add_media_properties_changed(self.on_media_changed)
+        self._playback_token = self.session.add_playback_info_changed(self.on_playback_changed)
         self._call_on_main(self._schedule_initial_sync)
 
     def _same_session(self, new_session) -> bool:
