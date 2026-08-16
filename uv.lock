@@ -233,11 +233,11 @@ wheels = [
 
 [[package]]
 name = "netease-cloudmusic-detector"
-version = "2.0.3"
+version = "2.0.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0e/26/9279611b0811a80b32a9ad6b632564bef1208aa923df8861b2b77570e62e/netease_cloudmusic_detector-2.0.3.tar.gz", hash = "sha256:3ed809dee3f302cc7793da704c33a66b9109786df97b7173ff00c5de85038c50", size = 21981, upload-time = "2026-08-16T11:05:49.734Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/75/bd17a2b690e6fbce0ba66d6b9cd3a3996eb7cdc11f67c5b7d46b6bb40974/netease_cloudmusic_detector-2.0.4.tar.gz", hash = "sha256:d7d01ee4d83847cb25ff179119583187c0a1d663e364c035bd63608daec0ca2a", size = 22681, upload-time = "2026-08-16T14:01:21.478Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/34/db/e76baf69141d256cb0bc728eda92291039d764837896b58c0e3a7ebc457b/netease_cloudmusic_detector-2.0.3-py3-none-any.whl", hash = "sha256:44623cd765e1bfeea1fdfd438f87a5418ee03014e5cbd3e9a569f60b47e9d028", size = 14739, upload-time = "2026-08-16T11:05:48.472Z" },
+    { url = "https://files.pythonhosted.org/packages/24/58/973b770f735edae50699b1d57f488e927278343e8156ca1413f7db4b3f6f/netease_cloudmusic_detector-2.0.4-py3-none-any.whl", hash = "sha256:c66139e1dbdffa43ccad531f5ee96dc721565bc2cfa030db2730d8a825c1bbe8", size = 15013, upload-time = "2026-08-16T14:01:20.345Z" },
 ]
 
 [[package]]

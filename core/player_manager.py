@@ -28,7 +28,8 @@ class PlayerManager:
     def __init__(
         self, 
         players_config: Dict[str, Any],
-        media_changed_callback: Optional[Callable[[MediaChange], None]] = None
+        media_changed_callback: Optional[Callable[[MediaChange], None]] = None,
+        error_callback: Optional[Callable[[str], None]] = None
     ):
         """
         初始化播放器管理器
@@ -36,9 +37,11 @@ class PlayerManager:
         Args:
             players_config: 播放器配置字典，格式为 {播放器名称: {process: SMTC 会话标识}}
             media_changed_callback: 媒体变化回调函数，签名为 callback(change: MediaChange)
+            error_callback: 初始化失败上报回调，签名为 callback(reason: str)
         """
         self.players_config = players_config
         self.media_changed_callback = media_changed_callback
+        self.error_callback = error_callback
         self._current_fetcher: Optional[Fetcher] = None
         self._current_player_name: Optional[str] = None
     
@@ -73,7 +76,8 @@ class PlayerManager:
         logger.info("切换到播放器：%s", player_name)
         # 创建新的 Fetcher
         self._current_fetcher = select_fetcher(
-            player_name, self.media_changed_callback, self.players_config, netease_adapter
+            player_name, self.media_changed_callback, self.players_config, netease_adapter,
+            self.error_callback,
         )
         self._current_player_name = player_name
     

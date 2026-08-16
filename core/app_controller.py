@@ -90,6 +90,9 @@ class AppController(QObject):
 
     # 播放器不支持进度同步的警告通知（UI 层据此弹出警告框）
     progress_unsupported_warning = pyqtSignal(str)  # (player_name)
+
+    # 网易云日志适配器初始化失败通知（UI 层据此弹出警告框）
+    netease_log_init_failed = pyqtSignal(str)  # (reason)
     def __init__(self, settings: Optional[SettingsManager] = None):
         super().__init__()
         
@@ -100,7 +103,8 @@ class AppController(QObject):
         # 播放器管理器（回调指向内部方法）
         self.player_manager = PlayerManager(
             players_config=self.settings.get_players(),
-            media_changed_callback=self._on_media_changed_internal
+            media_changed_callback=self._on_media_changed_internal,
+            error_callback=self._on_fetcher_init_error,
         )
         
         # 歌词服务（初始时 fetcher 为 None，切换播放器后更新）
@@ -440,10 +444,9 @@ class AppController(QObject):
         if fetcher is None or self._lyric_window is None:
             return
         try:
-            progress = fetcher.get_progress()
+            progress, duration = fetcher.get_timeline()
             if progress is not None:
                 self._lyric_window.set_external_time(int(progress * 1000))
-            duration = fetcher.get_duration()
             if duration:
                 self._lyric_window.song_duration = int(duration * 1000)
         except Exception:
@@ -514,6 +517,11 @@ class AppController(QObject):
             self._lyric_window.song_duration = duration_ms
     
     # ---- 内部方法 ----
+    
+    def _on_fetcher_init_error(self, reason: str) -> None:
+        """Fetcher 初始化失败回调：仅上报网易云日志适配器失败，提示 UI 弹警告窗"""
+        logger.warning("Fetcher 初始化失败上报：%s", reason)
+        self.netease_log_init_failed.emit(reason)
     
     def _on_media_changed_internal(self, change: MediaChange) -> None:
         """媒体变化事件处理（按事件类型分发）"""

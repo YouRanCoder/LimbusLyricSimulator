@@ -221,6 +221,7 @@ class ControlPanel(FluentWindow):
         self.controller.song_updated.connect(self._on_song_updated)
         self.controller.playback_status_updated.connect(self._on_playback_status_updated)
         self.controller.progress_unsupported_warning.connect(self._on_progress_unsupported_warning)
+        self.controller.netease_log_init_failed.connect(self._on_netease_log_init_failed)
 
     def _connect_ui_events(self) -> None:
         """连接 UI 控件事件到 Controller 方法"""
@@ -697,6 +698,16 @@ class ControlPanel(FluentWindow):
         """播放器不支持进度同步时弹出警告框"""
         logger.warning("播放器 %s 不支持进度同步，只能从头播放", player_name)
         warn(self, "不支持进度同步", f"「{player_name}」不支持进度同步，歌词只能从头播放")
+
+    def _on_netease_log_init_failed(self, reason: str) -> None:
+        """网易云日志适配器初始化失败时弹出警告框"""
+        logger.warning("网易云日志适配器初始化失败：%s", reason)
+        warn(
+            self,
+            "网易云日志读取失败",
+            f"无法读取网易云日志（{reason}），歌词无法通过日志同步。\n"
+            "请切换为 SMTC 适配方式，或检查网易云客户端是否在运行。",
+        )
 
     def _on_preset_list_updated(self, preset_names: list) -> None:
         """预设列表更新"""

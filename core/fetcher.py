@@ -84,7 +84,8 @@ class Fetcher(ABC):
     CAP_PROGRESS = "progress"
     CAP_EVENT = "event"
 
-    def __init__(self, player_name: str, callback: callable = None, settings: Dict = None) -> None:
+    def __init__(self, player_name: str, callback: callable = None, settings: Dict = None,
+                 error_callback: callable = None) -> None:
         """
         初始化Fetcher
         
@@ -92,16 +93,27 @@ class Fetcher(ABC):
             player_name: 播放器名称
             callback: 媒体变化回调函数，签名为 callback(change: MediaChange)
             settings: 播放器配置字典，格式为 {process: SMTC 会话标识}
+            error_callback: 初始化失败上报回调，签名为 callback(reason: str)
         """
         self.player_name: str = player_name
         self.callback = callback
         self.settings: Dict = settings or {}
+        self.error_callback: callable = error_callback
         # 播放器配置（子类通过 super().__init__(player_name, callback, settings) 传入）
         self.capabilities = set()
         self._current_song = None
         self._current_artist = None
         self._last_media = MediaInfo()
         self._loop: asyncio.AbstractEventLoop | None = self._get_main_loop()
+
+    def _report_init_error(self, reason: str) -> None:
+        """上报初始化失败（仅供启动失败时调用，供 UI 弹出警告窗）。"""
+        logger.warning("Fetcher 初始化失败：%s（%s）", self.player_name, reason)
+        if self.error_callback:
+            try:
+                self.error_callback(reason)
+            except Exception:
+                logger.debug("初始化失败上报回调执行异常", exc_info=True)
     
     # ---- 生命周期（子类必须实现） ----
     @abstractmethod
@@ -124,6 +136,14 @@ class Fetcher(ABC):
     def get_duration(self) -> float | None:
         """返回总时长（秒）；不支持时返回 None。"""
         return None
+
+    def get_timeline(self) -> tuple[float | None, float | None]:
+        """合并读取播放进度与总时长（秒），一次调用即返回。
+
+        默认回退到独立的 get_progress()/get_duration()；需要单次底层调用
+        （如 SMTC 的 get_timeline_properties）的子类可覆盖以消除重复查询。
+        """
+        return self.get_progress(), self.get_duration()
 
     def supports(self, capability) -> bool:
         """返回是否支持指定功能。"""
@@ -191,11 +211,12 @@ class Fetcher(ABC):
 
 class FetcherBySMTC(Fetcher):
     """基于 Windows SMTC 的通用播放器获取器（事件驱动）。
-    通过系统媒体传输控件监听指定进程的切歌事件，不提供进度查询。
+    通过系统媒体传输控件监听指定进程的切歌事件，并轮询 SMTC 播放进度。
+    SMTC 的 position 可能不可靠（网易云常不更新），get_progress 内做位置保护。
     """
 
-    def __init__(self, player_name, callback=None, settings=None) -> None:
-        super().__init__(player_name, callback, settings)
+    def __init__(self, player_name, callback=None, settings=None, error_callback=None) -> None:
+        super().__init__(player_name, callback, settings, error_callback)
         self.capabilities: set[str] = {self.CAP_EVENT, self.CAP_PROGRESS}
         self.session = None
         # SessionManager
@@ -207,6 +228,9 @@ class FetcherBySMTC(Fetcher):
         self._sessions_token = None
         self._media_props_token = None
         self._playback_token = None
+        # 位置保护状态：记录上次有效 position 与停滞计数，识别 SMTC 进度停滞
+        self._last_pos: float | None = None
+        self._stalled_count: int = 0
 
     # ---- 生命周期 ----
     def start(self) -> None:
@@ -247,30 +271,55 @@ class FetcherBySMTC(Fetcher):
             is_playing=self._is_playing,
         )
     def get_progress(self) -> float | None:
-        """返回当前播放进度（秒）；无会话或读取失败时返回 None。"""
-        if self.session is None:
+        """返回当前播放进度（秒）；无会话或读取失败时返回 None。
+
+        位置保护：SMTC 对部分播放器（尤其网易云）的 position 更新不可靠，
+        可能一直停在 0 或陈旧值。播放中若连续多次采样 position 未前进，
+        判定进度失效并返回 None，让上层回退到内部计时，避免歌词被钉死。
+        """
+        position, _ = self._read_timeline()
+        if position is None:
             return None
-        try:
-            timeline = self.session.get_timeline_properties()
-            if timeline is None:
-                return None
-            return timeline.position.total_seconds()
-        except Exception:
-            logger.debug("读取 SMTC 播放进度失败", exc_info=True)
+        if not self._is_playing:
+            return position
+        # 播放中：position 应随时间前进。比较两次采样的差值判定是否停滞
+        if self._last_pos is not None:
+            if position - self._last_pos < 0.05:
+                self._stalled_count += 1
+            else:
+                self._stalled_count = 0
+        self._last_pos = position
+        if self._stalled_count >= 5:
+            logger.debug(
+                "SMTC 播放进度停滞（position=%ss），回退内部计时",
+                position,
+            )
             return None
+        return position
 
     def get_duration(self) -> float | None:
         """返回总时长（秒）；无会话或读取失败时返回 None。"""
+        _, duration = self._read_timeline()
+        return duration
+
+    def get_timeline(self) -> tuple[float | None, float | None]:
+        """合并读取进度与总时长：单次 winrt 调用返回两者。"""
+        return self._read_timeline()
+
+    def _read_timeline(self) -> tuple[float | None, float | None]:
+        """一次 winrt 调用读取 (position, duration)；失败时返回 (None, None)。"""
         if self.session is None:
-            return None
+            return None, None
         try:
             timeline = self.session.get_timeline_properties()
-            if timeline is None or timeline.end_time is None:
-                return None
-            return timeline.end_time.total_seconds()
+            if timeline is None:
+                return None, None
+            position = timeline.position.total_seconds()
+            duration = timeline.end_time.total_seconds() if timeline.end_time is not None else None
+            return position, duration
         except Exception:
-            logger.debug("读取 SMTC 总时长失败", exc_info=True)
-            return None
+            logger.debug("读取 SMTC 播放进度失败", exc_info=True)
+            return None, None
     # ---- 内部实现 ----
     async def init(self) -> None:
         self.manager: GlobalSystemMediaTransportControlsSessionManager = (
@@ -445,9 +494,9 @@ class FetcherByCMLog(Fetcher):
     不会卡住 Qt 事件循环（此前阻塞约 1~2 秒导致打包版启动卡顿）。
     """
 
-    def __init__(self, player_name, callback=None, settings=None) -> None:
+    def __init__(self, player_name, callback=None, settings=None, error_callback=None) -> None:
         """callback:媒体变化回调，签名为 callback(change: MediaChange)"""
-        super().__init__(player_name, callback, settings)
+        super().__init__(player_name, callback, settings, error_callback)
         self.capabilities: set[str] = {self.CAP_PROGRESS, self.CAP_EVENT}
         self._task: Task | None = None
         self._cloud_music: AsyncCloudMusic | None = None
@@ -497,9 +546,11 @@ class FetcherByCMLog(Fetcher):
             logger.warning(
                 "网易云日志监听启动超时（elog 回溯 > 20s），放弃日志适配器"
             )
+            self._report_init_error("elog 回溯超时（>20s）")
             return
         except Exception:
             logger.warning("启动网易云日志监听失败", exc_info=True)
+            self._report_init_error("elog 读取失败，请检查网易云客户端是否运行")
             return
         self._cloud_music = cm
         # 推送初始快照（不触发回调）
@@ -581,14 +632,15 @@ class FetcherByCMLog(Fetcher):
         self._call_on_main(self._sync_state)
 
 
-def select_fetcher(player_name: str, callback: callable = None, settings: Dict = None, netease_adapter: bool = True) -> Fetcher:
+def select_fetcher(player_name: str, callback: callable = None, settings: Dict = None,
+                   netease_adapter: bool = True, error_callback: callable = None) -> Fetcher:
     """根据播放器名称选择合适的Fetcher实现"""
     if player_name.lower() == "网易云音乐" and netease_adapter:
         logger.info("播放器 %s 使用网易云日志 Fetcher", player_name)
-        return FetcherByCMLog(player_name, callback, settings)
+        return FetcherByCMLog(player_name, callback, settings, error_callback)
     else:
         logger.info("播放器 %s 使用 SMTC Fetcher", player_name)
-        return FetcherBySMTC(player_name, callback, settings)
+        return FetcherBySMTC(player_name, callback, settings, error_callback)
 
 
 async def list_smtc_sessions() -> list:
