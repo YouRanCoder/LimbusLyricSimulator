@@ -34,10 +34,17 @@ if __name__ == "__main__":
     # 0. 初始化日志（控制台 + log/ 目录下按日期时间命名的日志文件 + latest.log）
     log_file = setup_logging()
     logger.info("程序启动，日志文件：%s", log_file)
+    try:
+        detector_version = __import__(
+            "importlib.metadata", fromlist=["version"]
+        ).version("netease-cloudmusic-detector")
+    except Exception:
+        # PyInstaller 打包后不含 dist-info，取不到版本号时降级为未知
+        detector_version = "未知（打包环境）"
     logger.info(
         "运行环境：Python %s，netease-cloudmusic-detector %s",
         sys.version.split()[0],
-        __import__("importlib.metadata", fromlist=["version"]).version("netease-cloudmusic-detector"),
+        detector_version,
     )
 
     # 0.5 启用高 DPI 缩放（必须在 QApplication 创建前设置），
