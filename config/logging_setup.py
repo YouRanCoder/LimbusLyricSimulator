@@ -64,20 +64,25 @@ def setup_logging(level: int = logging.DEBUG) -> Path:
     # 按日期时间生成日志文件名
     file_name = datetime.now().strftime("app_%Y%m%d_%H%M%S.log")
     _log_file_path = log_dir / file_name
+    # 固定文件名 latest.log：始终指向最近一次运行的日志，
+    # 配合时间戳文件使用，方便快速查看"刚发生的这次"日志
+    latest_path = log_dir / "latest.log"
 
     root = logging.getLogger()
     root.setLevel(level)
 
-    # 文件输出（UTF-8 编码，避免中文乱码；防止单文件过大）
-    file_handler = logging.handlers.RotatingFileHandler(
-        _log_file_path,
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(level)
-    file_handler.setFormatter(logging.Formatter(_FILE_FORMAT, datefmt=_DATE_FORMAT))
-    root.addHandler(file_handler)
+    # 文件输出（UTF-8 编码，避免中文乱码；防止单文件过大）。
+    # 同时写入时间戳文件与 latest.log 两份。
+    for path in (_log_file_path, latest_path):
+        file_handler = logging.handlers.RotatingFileHandler(
+            path,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(level)
+        file_handler.setFormatter(logging.Formatter(_FILE_FORMAT, datefmt=_DATE_FORMAT))
+        root.addHandler(file_handler)
 
     # 第三方库 DEBUG 日志噪音极大：qasync 会在 submit 时把 to_thread 的回调
     # 参数整体格式化（例如整个 elog 文件内容），在 UI 线程上构建巨型字符串，

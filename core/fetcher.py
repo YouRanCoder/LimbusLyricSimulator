@@ -527,8 +527,17 @@ class FetcherByCMLog(Fetcher):
         """读取最新快照，通过统一的 _update_media 比对并分发事件。"""
         if self._cloud_music is None:
             return
+        state = self._cloud_music.state
+        logger.debug(
+            "网易云日志快照：%s - %s，position=%s，duration=%s，%s",
+            state.track.name,
+            state.track.artist_str,
+            state.position,
+            state.track.duration,
+            "播放" if state.is_playing else "暂停",
+        )
         self._update_media(
-            MediaInfo.from_playing_state(self._cloud_music.state),
+            MediaInfo.from_playing_state(state),
             notify=notify,
         )
 

@@ -31,9 +31,14 @@ def qt_message_handler(mode, context, message):
 
 
 if __name__ == "__main__":
-    # 0. 初始化日志（控制台 + log/ 目录下按日期时间命名的日志文件）
+    # 0. 初始化日志（控制台 + log/ 目录下按日期时间命名的日志文件 + latest.log）
     log_file = setup_logging()
     logger.info("程序启动，日志文件：%s", log_file)
+    logger.info(
+        "运行环境：Python %s，netease-cloudmusic-detector %s",
+        sys.version.split()[0],
+        __import__("importlib.metadata", fromlist=["version"]).version("netease-cloudmusic-detector"),
+    )
 
     # 0.5 启用高 DPI 缩放（必须在 QApplication 创建前设置），
     #     否则在高分屏（如 200% 缩放）下文字/图标会渲染得很小
