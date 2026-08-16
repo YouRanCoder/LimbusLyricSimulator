@@ -458,22 +458,53 @@ class FetcherByCMLog(Fetcher):
             return
         logger.info("启动网易云日志监听：%s", self.player_name)
         self._task = asyncio.get_event_loop().create_task(self._init())
+        # task 异常静默会导致"监听毫无反应但无日志"的假象，这里记录
+        self._task.add_done_callback(self._on_init_done)
         return super().start()
 
+    def _on_init_done(self, task: Task) -> None:
+        """记录 _init 结束状态（正常/异常），避免 task 异常被静默吞掉。"""
+        if task.cancelled():
+            logger.debug("网易云日志监听启动任务已取消")
+        elif task.exception() is not None:
+            logger.warning(
+                "网易云日志监听启动任务异常", exc_info=task.exception()
+            )
+        else:
+            logger.debug("网易云日志监听启动任务正常结束")
+
     async def _init(self) -> None:
-        cm = AsyncCloudMusic()
-        # 先注册回调（依赖库会将回调调度回事件循环线程）
-        cm.on_track_change(self._on_track_change)
-        cm.on_state_change(self._on_state_change)
         try:
-            await cm.start()
+            cm = AsyncCloudMusic()
+            # 先注册回调（依赖库会将回调调度回事件循环线程）
+            cm.on_track_change(self._on_track_change)
+            cm.on_state_change(self._on_state_change)
+            # 记录 elog 路径与大小，便于定位"启动后无任何反应"类问题
+            try:
+                elog_path = cm._listener.file_path
+                logger.info("网易云 elog 路径：%s", elog_path)
+                import os
+                logger.info(
+                    "网易云 elog 大小：%s",
+                    f"{os.path.getsize(elog_path) / 1024 / 1024:.1f} MB" if os.path.exists(elog_path) else "不存在",
+                )
+            except Exception:
+                pass
+            # 加超时保护：cm.start() 内部是 to_thread 回溯整个 elog，
+            # 超大文件时可能耗时很长，超时则降级到 SMTC 语义并给出明确日志
+            await asyncio.wait_for(cm.start(), timeout=20)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "网易云日志监听启动超时（elog 回溯 > 20s），放弃日志适配器"
+            )
+            return
         except Exception:
             logger.warning("启动网易云日志监听失败", exc_info=True)
             return
         self._cloud_music = cm
         # 推送初始快照（不触发回调）
         self._sync_state(notify=False)
-        logger.debug("网易云日志监听初始化完成")
+        logger.info("网易云日志监听初始化完成")
 
     def stop(self) -> None:
         if self._cloud_music is not None:

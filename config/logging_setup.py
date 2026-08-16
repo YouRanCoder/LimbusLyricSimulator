@@ -92,6 +92,8 @@ def setup_logging(level: int = logging.DEBUG) -> Path:
         "asyncio",     # proactor/事件循环内部 DEBUG
         "winrt",       # SMTC 底层包装
         "aiohttp",     # 歌词搜索 HTTP 客户端
+        "httpx",       # HTTP 请求 DEBUG/INFO 噪音
+        "httpcore",    # httpx 底层连接/请求逐事件 DEBUG（刷屏最严重）
         "urllib3",     # aiohttp 底层连接池
         "charset_normalizer",
     ):
