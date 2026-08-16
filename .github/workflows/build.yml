@@ -25,21 +25,20 @@ jobs:
         run: uv sync --frozen --group dev
 
       - name: PyInstaller 打包
-        # main.spec 按仓库约定不入库（*.spec 已 gitignore），
-        # 这里用 CLI 参数等价构建：单文件 + 无控制台窗口
-        run: uv run pyinstaller --noconfirm --onefile --windowed --name main main.py
+        # 使用入库的 main.spec（onedir）：生成 dist\main\ 目录（含 main.exe + _internal\）
+        run: uv run pyinstaller --noconfirm main.spec
 
       - name: 拷贝配置文件与字体到 dist
         shell: pwsh
         run: |
-          Copy-Item -LiteralPath "lyric_config.json" -Destination "dist\lyric_config.json" -Force
-          Copy-Item -LiteralPath "assets" -Destination "dist" -Recurse -Force
+          Copy-Item -LiteralPath "lyric_config.json" -Destination "dist\main\lyric_config.json" -Force
+          Copy-Item -LiteralPath "assets" -Destination "dist\main" -Recurse -Force
 
       - name: 打 zip 包
         shell: pwsh
         run: |
           $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { 'latest' }
-          Compress-Archive -Path "dist\main.exe","dist\lyric_config.json","dist\assets" -DestinationPath "TPRLimbusLyric-$version-${{ github.sha }}.zip" -Force
+          Compress-Archive -Path "dist\main" -DestinationPath "TPRLimbusLyric-$version-${{ github.sha }}.zip" -Force
           Write-Output "已生成压缩包：TPRLimbusLyric-$version-${{ github.sha }}.zip"
 
       - name: 上传构建产物
