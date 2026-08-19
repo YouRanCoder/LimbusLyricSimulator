@@ -271,17 +271,28 @@ class FetcherBySMTC(Fetcher):
             is_playing=self._is_playing,
         )
     def get_progress(self) -> float | None:
-        """返回当前播放进度（秒）；无会话或读取失败时返回 None。
+        """返回当前播放进度（秒）；无会话或读取失败时返回 None。"""
+        position, _ = self.get_timeline()
+        return position
+
+    def get_duration(self) -> float | None:
+        """返回总时长（秒）；无会话或读取失败时返回 None。"""
+        _, duration = self.get_timeline()
+        return duration
+
+    def get_timeline(self) -> tuple[float | None, float | None]:
+        """合并读取进度与总时长：单次 winrt 调用返回两者。
 
         位置保护：SMTC 对部分播放器（尤其网易云）的 position 更新不可靠，
         可能一直停在 0 或陈旧值。播放中若连续多次采样 position 未前进，
-        判定进度失效并返回 None，让上层回退到内部计时，避免歌词被钉死。
+        判定进度失效并返回 (None, duration)，让上层回退到内部计时，
+        避免歌词被钉死在第一句。
         """
-        position, _ = self._read_timeline()
+        position, duration = self._read_timeline()
         if position is None:
-            return None
+            return None, duration
         if not self._is_playing:
-            return position
+            return position, duration
         # 播放中：position 应随时间前进。比较两次采样的差值判定是否停滞
         if self._last_pos is not None:
             if position - self._last_pos < 0.05:
@@ -294,17 +305,8 @@ class FetcherBySMTC(Fetcher):
                 "SMTC 播放进度停滞（position=%ss），回退内部计时",
                 position,
             )
-            return None
-        return position
-
-    def get_duration(self) -> float | None:
-        """返回总时长（秒）；无会话或读取失败时返回 None。"""
-        _, duration = self._read_timeline()
-        return duration
-
-    def get_timeline(self) -> tuple[float | None, float | None]:
-        """合并读取进度与总时长：单次 winrt 调用返回两者。"""
-        return self._read_timeline()
+            return None, duration
+        return position, duration
 
     def _read_timeline(self) -> tuple[float | None, float | None]:
         """一次 winrt 调用读取 (position, duration)；失败时返回 (None, None)。"""

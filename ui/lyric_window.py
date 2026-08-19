@@ -447,6 +447,20 @@ class LyricWindow(QMainWindow):
         if self.lyric_timeline and self.line_timer.isActive():
             self.check_lyric_time()
 
+    def switch_to_internal_timing(self):
+        """外部进度不可用（SMTC 停滞/读取失败）：切回内部计时并衔接当前进度
+
+        把内部计时基准设为「当前时刻 - 最后有效外部进度」，使内部 elapsed
+        从最后进度继续推进，而不是从 0 重新开始，避免歌词跳回第一句。
+        """
+        if self.external_time is None:
+            return
+        logger.debug("切换回内部计时：从 %dms 衔接", self.external_time)
+        self.start_time = time.time() * 1000 - self.external_time
+        self.external_time = None
+        self._last_external_time = None
+        self._progress_rewound = False
+
     def show_next_char(self):
         total_chars = sum(len(line) for line in self.wrapped_lines)
         if self.char_index < total_chars:

@@ -447,6 +447,10 @@ class AppController(QObject):
             progress, duration = fetcher.get_timeline()
             if progress is not None:
                 self._lyric_window.set_external_time(int(progress * 1000))
+            else:
+                # 进度不可用（SMTC 停滞/读取失败）：切回内部计时并衔接，
+                # 避免 external_time 停留在陈旧值导致歌词被钉死
+                self._lyric_window.switch_to_internal_timing()
             if duration:
                 self._lyric_window.song_duration = int(duration * 1000)
         except Exception:
