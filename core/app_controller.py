@@ -9,6 +9,7 @@
 """
 
 from dataclasses import dataclass
+import re
 from typing import Optional, Callable, Dict, Any
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor, QFont
@@ -17,6 +18,7 @@ from core.player_manager import PlayerManager
 from core.lyric_service import LyricService, LyricResult
 from core.settings_manager import SettingsManager
 from core.fetcher import Fetcher, FetcherEvent, MediaChange, MediaInfo
+from config.settings import DEFAULT_CREDIT_PATTERNS
 import logging
 
 logger = logging.getLogger(__name__)
@@ -213,8 +215,9 @@ class AppController(QObject):
             )
 
             if result.success:
+                lyric = self.filter_credit_lines(result.lyric)
                 logger.info("歌词获取成功：%s - %s，时长 %dms", result.song, result.artist, result.duration_ms)
-                self.lyric_fetched.emit(result.lyric, result.duration_ms, result.song, result.artist)
+                self.lyric_fetched.emit(lyric, result.duration_ms, result.song, result.artist)
                 self.status_changed.emit(f"状态：已获取「{result.song}」的歌词")
                 return True
             else:
@@ -519,6 +522,27 @@ class AppController(QObject):
         """设置歌曲时长"""
         if self._lyric_window:
             self._lyric_window.song_duration = duration_ms
+
+    def filter_credit_lines(self, text: str) -> str:
+        """过滤掉歌词中的编曲作词等标注行"""
+        if not self.settings.get_setting('filter_credits', True):
+            return text
+        patterns = self.settings.get_setting('credit_patterns', None)
+        if not patterns:
+            patterns = list(DEFAULT_CREDIT_PATTERNS)
+        compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
+        lines = text.split('\n')
+        filtered = []
+        for line in lines:
+            ls = line.strip()
+            if not ls:
+                filtered.append(line)
+                continue
+            ts_match = re.match(r'\[(\d+):(\d+)(?:[.:](\d+))?\](.*)', ls)
+            text_part = ts_match.group(4).strip() if ts_match else ls
+            if not any(p.search(text_part) for p in compiled):
+                filtered.append(line)
+        return '\n'.join(filtered)
     
     # ---- 内部方法 ----
     

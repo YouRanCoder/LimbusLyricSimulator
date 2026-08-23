@@ -10,7 +10,7 @@ import json
 from typing import Dict, Any, Optional
 from logging import getLogger
 from config.manage import load_all_config, save_all_config, DEFAULT_PLAYERS
-from config.settings import DEFAULT_PRESETS, DEFAULT_INST_PATTERNS
+from config.settings import DEFAULT_PRESETS, DEFAULT_INST_PATTERNS, DEFAULT_CREDIT_PATTERNS
 
 logger = getLogger(__name__)
 
@@ -211,6 +211,8 @@ class SettingsManager:
             'netease_adapter_enabled': True,
             'filter_pure_music': True,
             'inst_patterns': list(DEFAULT_INST_PATTERNS),
+            'filter_credits': True,
+            'credit_patterns': list(DEFAULT_CREDIT_PATTERNS),
             'perspective_enabled': True,
             'persp_x_strength': 5,
             'persp_y_strength': 30,

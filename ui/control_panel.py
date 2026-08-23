@@ -131,6 +131,7 @@ class ControlPanel(FluentWindow):
                 p.close_behavior_combo.setCurrentIndex(close_idx)
             p.netease_adapter_check.setChecked(settings.get_setting('netease_adapter_enabled', True))
             p.filter_pure_music_check.setChecked(settings.get_setting('filter_pure_music', True))
+            p.filter_credits_check.setChecked(settings.get_setting('filter_credits', True))
             self.inst_patterns = settings.get_setting('inst_patterns', None)
             idx = a.mode_combo.findData(settings.get_setting('mode', 'chinese'))
             if idx >= 0:
@@ -178,6 +179,7 @@ class ControlPanel(FluentWindow):
             'close_behavior': p.close_behavior_combo.currentData(),
             'netease_adapter_enabled': p.netease_adapter_check.isChecked(),
             'filter_pure_music': p.filter_pure_music_check.isChecked(),
+            'filter_credits': p.filter_credits_check.isChecked(),
             'mode': a.mode_combo.currentData(),
             'font_family': a.font_combo.currentText(),
             'font_size': a.font_size.value(),
@@ -247,6 +249,9 @@ class ControlPanel(FluentWindow):
 
         # 网易云适配方式
         p.netease_adapter_check.checkedChanged.connect(self._on_netease_adapter_changed)
+
+        # 编曲作词过滤开关：切换时保存并更新已获取歌词的显示
+        p.filter_credits_check.checkedChanged.connect(self._on_filter_credits_changed)
 
         # 预设
         a.preset_combo.currentTextChanged.connect(self._on_load_preset)
@@ -529,6 +534,12 @@ class ControlPanel(FluentWindow):
         """开始播放：输入框有内容直接播放，为空则自动获取歌词"""
         p, a, n, t = self._playback, self._appearance, self._animation, self._timeline
         text = p.text_input.toPlainText().strip()
+        # 手动粘贴的歌词也应用编曲作词过滤
+        if text and p.filter_credits_check.isChecked():
+            filtered = self.controller.filter_credit_lines(text)
+            if filtered != text:
+                p.text_input.setPlainText(filtered)
+                text = filtered
         if not text:
             # 无歌词文本：有歌曲在播放则自动获取，否则提示输入
             media = self.controller.get_current_media()
@@ -624,6 +635,15 @@ class ControlPanel(FluentWindow):
                 "如果您使用inflink-rs等第三方网易云插件不能正常运行时请取消勾选，否则如果能正常运行请保持默认设置"
             )
         self.controller.set_netease_adapter(enabled)
+
+    def _on_filter_credits_changed(self, enabled: bool) -> None:
+        """编曲作词过滤开关：重新过滤当前歌词框中的内容"""
+        logger.info("编曲作词过滤已%s", "开启" if enabled else "关闭")
+        self.controller.settings.set_setting('filter_credits', enabled)
+        text = self._playback.text_input.toPlainText()
+        if text:
+            filtered = self.controller.filter_credit_lines(text)
+            self._playback.text_input.setPlainText(filtered)
 
     def _on_autostart_changed(self, enabled: bool) -> None:
         """开机自启动开关：写入/移除注册表启动项"""

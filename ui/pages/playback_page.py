@@ -46,6 +46,9 @@ class PlaybackPage:
         pure_card, self.filter_pure_music_check = switch_card(
             FluentIcon.BROOM, "过滤纯音乐/伴奏",
             "自动播放时按歌名特征识别，不显示歌词", checked=True)
+        credits_card, self.filter_credits_check = switch_card(
+            FluentIcon.FILTER, "自动略过编曲作词",
+            "不显示作词、作曲、编曲等标注行（可自定义正则）", checked=True)
         trans_card, self.trans_check = switch_card(
             FluentIcon.ROBOT, "仅获取翻译歌词", checked=False)
 
@@ -55,6 +58,7 @@ class PlaybackPage:
             FluentIcon.ALBUM, "歌词源", self.source_combo))
         player_group.addSettingCard(netease_card)
         player_group.addSettingCard(pure_card)
+        player_group.addSettingCard(credits_card)
         player_group.addSettingCard(trans_card)
 
         # ---- 歌词输入 ----
