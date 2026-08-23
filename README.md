@@ -8,6 +8,7 @@
   如果你的网易云过于卡顿，也请安装`inflink-rs` 插件之后取消勾选「使用网易云适配」（这个问题实在是太玄学了）
 - **酷狗音乐**：目前无法从 SMTC 服务读取播放进度，歌词只能从头播放。如需要进度同步，可考虑第三方如：[MoeKoeMusic](https://github.com/MoeKoeMusic/MoeKoeMusic)（第三方软件存在一定风险，请自行斟酌使用，注意保护个人信息）。
 - **伴奏（Inst）过滤**：编辑 `lyric_config.json`，可以修改匹配伴奏的正则。
+- 编曲/作词过滤：编辑 `lyric_config.json`，可以修改匹配的正则。
 
 # 已完成
 
