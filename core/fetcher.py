@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from abc import ABC, abstractmethod
 from asyncio import Task
 from dataclasses import dataclass
@@ -228,8 +229,9 @@ class FetcherBySMTC(Fetcher):
         self._sessions_token = None
         self._media_props_token = None
         self._playback_token = None
-        # 位置保护状态：记录上次有效 position 与停滞计数，识别 SMTC 进度停滞
+        # 位置保护状态：记录上次有效 position、采样时刻与停滞计数，识别 SMTC 进度停滞
         self._last_pos: float | None = None
+        self._last_sample_t: float | None = None
         self._stalled_count: int = 0
 
     # ---- 生命周期 ----
@@ -284,23 +286,28 @@ class FetcherBySMTC(Fetcher):
         """合并读取进度与总时长：单次 winrt 调用返回两者。
 
         位置保护：SMTC 对部分播放器（尤其网易云）的 position 更新不可靠，
-        可能一直停在 0 或陈旧值。播放中若连续多次采样 position 未前进，
-        判定进度失效并返回 (None, duration)，让上层回退到内部计时，
-        避免歌词被钉死在第一句。
+        可能一直停在 0 或陈旧值。播放中按挂钟时间判定停滞：position 前进量
+        明显低于实际采样间隔即判定进度失效，返回 (None, duration) 让上层
+        立即回退内部计时，避免歌词冻在陈旧进度上产生延迟感。
         """
         position, duration = self._read_timeline()
         if position is None:
             return None, duration
         if not self._is_playing:
             return position, duration
-        # 播放中：position 应随时间前进。比较两次采样的差值判定是否停滞
-        if self._last_pos is not None:
-            if position - self._last_pos < 0.05:
-                self._stalled_count += 1
-            else:
-                self._stalled_count = 0
+        # 播放中：position 应随时间前进。按实际采样间隔判定是否停滞，
+        # 避免事件循环抖动导致两次采样间隔过短而误判
+        now = time.monotonic()
+        if self._last_pos is not None and self._last_sample_t is not None:
+            dt = now - self._last_sample_t
+            if dt >= 0.05:
+                if position - self._last_pos >= dt * 0.3:
+                    self._stalled_count = 0
+                else:
+                    self._stalled_count += 1
         self._last_pos = position
-        if self._stalled_count >= 5:
+        self._last_sample_t = now
+        if self._stalled_count >= 2:
             logger.debug(
                 "SMTC 播放进度停滞（position=%ss），回退内部计时",
                 position,

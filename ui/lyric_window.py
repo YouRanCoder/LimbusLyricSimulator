@@ -450,15 +450,18 @@ class LyricWindow(QMainWindow):
     def switch_to_internal_timing(self):
         """外部进度不可用（SMTC 停滞/读取失败）：切回内部计时并衔接当前进度
 
-        把内部计时基准设为「当前时刻 - 最后有效外部进度」，使内部 elapsed
+        把内部计时基准设为「基准时刻 - 最后有效外部进度」，使内部 elapsed
         从最后进度继续推进，而不是从 0 重新开始，避免歌词跳回第一句。
+        暂停中以暂停时刻为基准，保证 resume 的暂停补偿不会重复计算。
+        保留 _last_external_time：回退期间若发生 seek 回退/单曲循环，
+        恢复外部进度时仍能触发回落重定位。
         """
         if self.external_time is None:
             return
         logger.debug("切换回内部计时：从 %dms 衔接", self.external_time)
-        self.start_time = time.time() * 1000 - self.external_time
+        base = self._paused_at if self._paused_at is not None else time.time() * 1000
+        self.start_time = base - self.external_time
         self.external_time = None
-        self._last_external_time = None
         self._progress_rewound = False
 
     def show_next_char(self):
