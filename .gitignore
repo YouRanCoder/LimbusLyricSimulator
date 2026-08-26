@@ -15,3 +15,4 @@ log/
 .vscode
 test
 *.log
+lyric_config.json

@@ -130,6 +130,7 @@ class ControlPanel(FluentWindow):
             if close_idx >= 0:
                 p.close_behavior_combo.setCurrentIndex(close_idx)
             p.netease_adapter_check.setChecked(settings.get_setting('netease_adapter_enabled', True))
+            p.exclude_capture_check.setChecked(settings.get_setting('exclude_from_capture', False))
             p.filter_pure_music_check.setChecked(settings.get_setting('filter_pure_music', True))
             p.filter_credits_check.setChecked(settings.get_setting('filter_credits', True))
             self.inst_patterns = settings.get_setting('inst_patterns', None)
@@ -178,6 +179,7 @@ class ControlPanel(FluentWindow):
             'autostart_enabled': p.autostart_check.isChecked(),
             'close_behavior': p.close_behavior_combo.currentData(),
             'netease_adapter_enabled': p.netease_adapter_check.isChecked(),
+            'exclude_from_capture': p.exclude_capture_check.isChecked(),
             'filter_pure_music': p.filter_pure_music_check.isChecked(),
             'filter_credits': p.filter_credits_check.isChecked(),
             'mode': a.mode_combo.currentData(),
@@ -249,6 +251,10 @@ class ControlPanel(FluentWindow):
 
         # 网易云适配方式
         p.netease_adapter_check.checkedChanged.connect(self._on_netease_adapter_changed)
+
+        # 防捕获模式（独立 Overlay）：切换时立即套用到歌词窗口
+        p.exclude_capture_check.checkedChanged.connect(
+            self.controller.set_exclude_from_capture)
 
         # 编曲作词过滤开关：切换时保存并更新已获取歌词的显示
         p.filter_credits_check.checkedChanged.connect(self._on_filter_credits_changed)

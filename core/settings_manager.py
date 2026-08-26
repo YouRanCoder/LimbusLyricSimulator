@@ -208,6 +208,8 @@ class SettingsManager:
             'player': '网易云音乐',
             'source': '网易云',
             'delay': 0,
+            # 防捕获（独立 Overlay）：开启后录屏/直播软件捕获不到歌词层
+            'exclude_from_capture': False,
             'netease_adapter_enabled': True,
             'filter_pure_music': True,
             'inst_patterns': list(DEFAULT_INST_PATTERNS),

@@ -138,6 +138,10 @@ class AppController(QObject):
         
         # 初始化歌词服务（此时 fetcher 已存在）
         self.lyric_service = LyricService(self.player_manager.current_fetcher)
+
+        # 应用已保存的防捕获设置（独立 Overlay：录屏/直播软件不可见）
+        if self.settings.get_setting('exclude_from_capture', False):
+            self.set_exclude_from_capture(True)
     
     # ---- 业务方法（UI 层调用这些方法触发业务逻辑） ----
     
@@ -497,6 +501,15 @@ class AppController(QObject):
         """设置单曲循环"""
         if self._lyric_window:
             self._lyric_window.loop = enabled
+
+    def set_exclude_from_capture(self, enabled: bool) -> None:
+        """设置歌词窗口防捕获（独立 Overlay：录屏/直播软件不可见）"""
+        self.settings.set_setting('exclude_from_capture', enabled)
+        if not self._lyric_window:
+            return
+        if not self._lyric_window.set_exclude_from_capture(enabled):
+            # 旧版 Windows 不支持 WDA_EXCLUDEFROMCAPTURE，提示用户
+            self.status_changed.emit("状态：防捕获开启失败（需要 Win10 2004+）")
     
     def set_pos_x_min(self, value: int) -> None:
         """设置歌词起始 X 最小值（百分比）"""

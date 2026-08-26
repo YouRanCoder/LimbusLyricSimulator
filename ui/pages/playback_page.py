@@ -109,6 +109,12 @@ class PlaybackPage:
         action_group.addSettingCard(widget_card(
             FluentIcon.CLOSE, "关闭按钮行为", self.close_behavior_combo))
 
+        exclude_capture_card, self.exclude_capture_check = switch_card(
+            FluentIcon.HIDE, "防捕获模式（独立 Overlay）",
+            "开启后 OBS/直播/录屏软件将看不到歌词层，本机显示不受影响（需 Win10 2004+）",
+            checked=False)
+        action_group.addSettingCard(exclude_capture_card)
+
         self.vbox.addWidget(player_group)
         self.vbox.addWidget(lyric_card)
         self.vbox.addWidget(action_group)

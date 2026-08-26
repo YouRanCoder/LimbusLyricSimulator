@@ -1,13 +1,13 @@
 {
   "settings": {
-    "text_color": "#ffea00",
-    "stroke_color": "#705109",
-    "glow_color": "#ffea00",
+    "text_color": "#fffeef",
+    "stroke_color": "#d8a523",
+    "glow_color": "#d8a523",
     "glow_enabled": true,
     "glow_size": 13,
     "glow_alpha": 23,
     "loop": false,
-    "trans_only": true,
+    "trans_only": false,
     "mode": "chinese",
     "font_family": "Mikodacs",
     "font_size": 30,
@@ -85,7 +85,8 @@
     "pos_y_max": 75,
     "zoom": 100,
     "autostart_enabled": false,
-    "close_behavior": "quit"
+    "close_behavior": "quit",
+    "exclude_from_capture": false
   },
   "presets": {
     "通用": {

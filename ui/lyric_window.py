@@ -2,11 +2,22 @@ from PyQt5.QtWidgets import QMainWindow, QApplication
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QPainterPath, QTransform
 import random, time, math
+import ctypes
 import logging
 from .fading_line import FadingLine
 from core.parser import parse_lrc
 
 logger = logging.getLogger(__name__)
+
+# Windows 窗口防捕获（独立 Overlay）：user32.SetWindowDisplayAffinity
+# WDA_EXCLUDEFROMCAPTURE 使窗口对本机用户可见，但 DXGI 桌面复制/
+# Windows.Graphics.Capture（OBS、Discord、录屏软件等）全部跳过它。
+# 需要 Win10 2004（19041）及以上；旧系统调用会失败并回退为不防捕获。
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_user32.SetWindowDisplayAffinity.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+_user32.SetWindowDisplayAffinity.restype = ctypes.c_bool
+_WDA_NONE = 0x00000000
+_WDA_EXCLUDEFROMCAPTURE = 0x00000011
 
 
 class LyricWindow(QMainWindow):
@@ -53,6 +64,45 @@ class LyricWindow(QMainWindow):
         self.pos_x_max = 85
         self.pos_y_min = 5
         self.pos_y_max = 75
+        # 防捕获（独立 Overlay）状态：True 时录屏/直播软件捕获不到歌词层
+        self._capture_excluded = False
+
+    def set_exclude_from_capture(self, enabled):
+        """启用/停用防捕获（独立 Overlay）：开启后录屏/直播软件看不到歌词层
+
+        通过 SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) 实现。
+        Returns:
+            bool: 是否设置成功（旧版 Windows 不支持时返回 False）
+        """
+        ok = self._apply_display_affinity(enabled)
+        if ok:
+            if enabled != self._capture_excluded:
+                logger.info("歌词窗口防捕获已%s（WDA_EXCLUDEFROMCAPTURE）",
+                            "开启" if enabled else "关闭")
+            self._capture_excluded = enabled
+        return ok
+
+    def _apply_display_affinity(self, enabled):
+        """对原生窗口套用/清除防捕获标记，返回是否成功"""
+        try:
+            # winId() 会按需创建原生句柄，未显示时调用同样有效
+            hwnd = int(self.winId())
+            affinity = _WDA_EXCLUDEFROMCAPTURE if enabled else _WDA_NONE
+            if not _user32.SetWindowDisplayAffinity(hwnd, affinity):
+                logger.warning("SetWindowDisplayAffinity 失败：affinity=0x%X，"
+                               "GetLastError=%d（需要 Win10 2004+）",
+                               affinity, ctypes.get_last_error())
+                return False
+            return True
+        except Exception:
+            logger.exception("应用窗口防捕获标记异常")
+            return False
+
+    def showEvent(self, event):
+        """窗口显示时重新套用防捕获标记（Qt 可能重建了原生句柄）"""
+        super().showEvent(event)
+        if self._capture_excluded:
+            self._apply_display_affinity(True)
 
     def _text_width(self, s):
         """精确测量一行文本的渲染宽度
