@@ -16,8 +16,15 @@ logger = logging.getLogger(__name__)
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 _user32.SetWindowDisplayAffinity.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
 _user32.SetWindowDisplayAffinity.restype = ctypes.c_bool
+_user32.SetWindowPos.argtypes = [
+    ctypes.c_void_p, ctypes.c_int,
+    ctypes.c_long, ctypes.c_long, ctypes.c_long, ctypes.c_long, ctypes.c_uint]
+_user32.SetWindowPos.restype = ctypes.c_bool
 _WDA_NONE = 0x00000000
 _WDA_EXCLUDEFROMCAPTURE = 0x00000011
+_HWND_TOPMOST = -1
+# SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE：只提升 z 序，不动位置/尺寸/焦点
+_SWP_ZORDER_ONLY = 0x0001 | 0x0002 | 0x0010
 
 
 class LyricWindow(QMainWindow):
@@ -66,6 +73,19 @@ class LyricWindow(QMainWindow):
         self.pos_y_max = 75
         # 防捕获（独立 Overlay）状态：True 时录屏/直播软件捕获不到歌词层
         self._capture_excluded = False
+        # 置顶保活：Lossless Scaling 等全屏输出窗口会抢占 z 序把歌词压下去，
+        # 周期性重新置顶保证歌词始终浮在插帧画面之上（不影响其捕获与插帧）
+        self._topmost_timer = QTimer(self)
+        self._topmost_timer.timeout.connect(self._enforce_topmost)
+        self._topmost_timer.start(1000)
+
+    def _enforce_topmost(self):
+        """把歌词窗重新钉回 topmost（只动 z 序，不抢焦点/位置/尺寸）"""
+        try:
+            hwnd = int(self.winId())
+        except Exception:
+            return
+        _user32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_ZORDER_ONLY)
 
     def set_exclude_from_capture(self, enabled):
         """启用/停用防捕获（独立 Overlay）：开启后录屏/直播软件看不到歌词层
