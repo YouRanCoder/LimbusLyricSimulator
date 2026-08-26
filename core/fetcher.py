@@ -30,6 +30,9 @@ class MediaInfo:
 
     song: str = ""
     artist: str = ""
+    # 网易云歌曲 ID：仅 elog 适配器能提供（用于精确直查歌词）；
+    # SMTC 无此信息，恒为 0，上层自动回退文本搜索
+    song_id: int = 0
     duration: float = 0.0
     position: float = 0.0
     is_playing: bool = False
@@ -52,9 +55,15 @@ class MediaInfo:
     @classmethod
     def from_playing_state(cls, state: PlayingState) -> "MediaInfo":
         """从 PlayingState 快照创建 MediaInfo"""
+        track_id = getattr(state.track, "id", 0) or 0
+        # detector 库对哈希型假 ID（本地导入/无服务器 ID 的下载曲）给出 -1，
+        # 归零以便上层回退文本搜索而不是拿无效 ID 去请求接口
+        if track_id < 0:
+            track_id = 0
         return cls(
             song=state.track.name,
             artist=state.track.artist_str,
+            song_id=track_id,
             duration=state.track.duration,
             position=state.position,
             is_playing=state.is_playing,

@@ -62,25 +62,32 @@ class LyricService:
         return info
     
     async def search_lyric(
-        self, 
-        song: str, 
-        artist: str, 
-        source: str, 
-        trans_only: bool = False
+        self,
+        song: str,
+        artist: str,
+        source: str,
+        trans_only: bool = False,
+        song_id: int = 0,
+        duration_ms: int = 0,
     ) -> Tuple[Optional[str], int]:
         """
         从指定歌词源异步搜索歌词
-        
+
         Args:
             song: 歌曲名称
             artist: 歌手名称
             source: 歌词源名称（如"网易云"、"QQ音乐"、"酷狗"）
             trans_only: 是否仅获取翻译歌词
-            
+            song_id: 网易云歌曲 ID（elog 适配器提供时用于精确直查，0 表示无）
+            duration_ms: 播放器上报的真实时长（毫秒），用于候选校验，0 表示未知
+
         Returns:
             Tuple[Optional[str], int]: (歌词文本, 时长毫秒)
         """
-        return await LyricSearchEngine.search(song, artist, source, trans_only)
+        return await LyricSearchEngine.search(
+            song, artist, source, trans_only,
+            song_id=song_id, duration_ms=duration_ms,
+        )
     
     async def fetch_lyric_with_fallback(
         self,
@@ -127,8 +134,11 @@ class LyricService:
                 logger.warning("未提供手动输入回调，返回空结果")
                 return LyricResult()
         
-        # 3. 搜索歌词
-        lyric, duration = await self.search_lyric(song, artist, source, trans_only)
+        # 3. 搜索歌词（携带歌曲 ID 与真实时长：ID 用于网易云精确直查，时长用于候选校验）
+        lyric, duration = await self.search_lyric(
+            song, artist, source, trans_only,
+            song_id=info.song_id, duration_ms=info.duration_ms,
+        )
         
         # 4. 构建结果
         # 优先使用播放器上报的真实时长，否则用搜索接口返回的时长
