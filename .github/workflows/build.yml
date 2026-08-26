@@ -28,11 +28,10 @@ jobs:
         # 使用入库的 main.spec（onedir）：生成 dist\main\ 目录（含 main.exe + _internal\）
         run: uv run pyinstaller --noconfirm main.spec
 
-      - name: 拷贝字体到 dist
-        # 不打包 lyric_config.json：它是用户本地配置（已不入库），
-        # 程序首次运行会自动以默认值生成
+      - name: 拷贝配置文件与字体到 dist
         shell: pwsh
         run: |
+          Copy-Item -LiteralPath "lyric_config.json" -Destination "dist\main\lyric_config.json" -Force
           Copy-Item -LiteralPath "assets" -Destination "dist\main" -Recurse -Force
 
       - name: 打 zip 包
