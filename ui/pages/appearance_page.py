@@ -26,6 +26,7 @@ class AppearancePage:
         self.btn_new = PushButton(FluentIcon.ADD, "")
         self.btn_del = PushButton(FluentIcon.REMOVE, "")
         self.mode_combo = ComboBox()
+        self.mode_combo.addItem("自动（按句判定）", userData="auto")
         self.mode_combo.addItem("中文", userData="chinese")
         self.mode_combo.addItem("英文", userData="english")
 

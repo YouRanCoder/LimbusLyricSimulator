@@ -187,7 +187,8 @@ class SettingsManager:
             'glow_alpha': 82,
             'loop': True,
             'trans_only': False,
-            'mode': 'chinese',
+            # 渲染模式：'auto'=按句判定（CJK→阴影式/纯拉丁→描边式），'chinese'/'english'=强制统一
+            'mode': 'auto',
             'font_family': 'Microsoft YaHei',
             'font_size': 28,
             'stroke_width': 0.5,

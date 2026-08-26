@@ -134,7 +134,7 @@ class ControlPanel(FluentWindow):
             p.filter_pure_music_check.setChecked(settings.get_setting('filter_pure_music', True))
             p.filter_credits_check.setChecked(settings.get_setting('filter_credits', True))
             self.inst_patterns = settings.get_setting('inst_patterns', None)
-            idx = a.mode_combo.findData(settings.get_setting('mode', 'chinese'))
+            idx = a.mode_combo.findData(settings.get_setting('mode', 'auto'))
             if idx >= 0:
                 a.mode_combo.setCurrentIndex(idx)
             a.font_combo.setCurrentText(settings.get_setting('font_family', 'Microsoft YaHei'))

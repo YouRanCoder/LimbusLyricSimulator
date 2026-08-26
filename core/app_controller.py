@@ -37,7 +37,7 @@ class LyricSettings:
     margin_time: int = 4000
     max_interval: int = 16000
     max_duration: int = 5000
-    mode: str = "chinese"
+    mode: str = "auto"
     spacing: float = 5.0
     shake_intensity: int = 2
     shake_speed: int = 143
@@ -510,7 +510,7 @@ class AppController(QObject):
         if not self._lyric_window.set_exclude_from_capture(enabled):
             # 旧版 Windows 不支持 WDA_EXCLUDEFROMCAPTURE，提示用户
             self.status_changed.emit("状态：防捕获开启失败（需要 Win10 2004+）")
-    
+
     def set_pos_x_min(self, value: int) -> None:
         """设置歌词起始 X 最小值（百分比）"""
         if self._lyric_window:

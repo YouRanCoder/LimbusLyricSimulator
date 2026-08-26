@@ -39,7 +39,9 @@ class LyricWindow(QMainWindow):
         self.text_color = QColor("#fffeef"); self.stroke_color = QColor("#d8a523")
         self.stroke_width = 0.5; self.angle_min = -10; self.angle_max = 10
         self.margin_time = 4000; self.max_interval = 16000; self.max_duration = 5000
-        self.mode = 'chinese'; self.spacing = 5.0
+        # mode 为用户全局选择：'chinese'/'english' 强制统一，'auto' 按句判定；
+        # _line_mode 为当前句实际生效的模式（恒为 'chinese'/'english'）
+        self.mode = 'auto'; self._line_mode = 'chinese'; self.spacing = 5.0
         self.shake_intensity = 2; self.shake_speed = 143
         self.fade_speed = 12; self.rise_speed = 1
         self.glow = True; self.glow_color = QColor("#d8a523")
@@ -136,6 +138,42 @@ class LyricWindow(QMainWindow):
         fm = QFontMetrics(self.font)
         total = sum(fm.horizontalAdvance(ch) for ch in s)
         return total + max(0, len(s) - 1) * self.spacing
+
+    @staticmethod
+    def _detect_line_mode(text):
+        """按句判定中英文渲染模式：含 CJK 文字 → 中文样式，否则英文样式
+
+        CJK 含汉字、日文假名、韩文谚文（笔画密集，阴影式更合适）。
+        中文歌词夹杂英文单词（极常见）仍归中文样式；
+        整句没有任何 CJK（纯英文/拼音）才用描边式。
+        无有效文字（纯符号/空串）返回 None，表示沿用全局模式。
+        每句仅在切句时调用一次，O(n) 字符扫描开销可忽略。
+        """
+        has_cjk = has_latin = False
+        for ch in text:
+            if ch.isspace():
+                continue
+            o = ord(ch)
+            if (0x2E80 <= o <= 0x9FFF or      # CJK 部首扩展/汉字/假名/注音
+                    0xAC00 <= o <= 0xD7AF or   # 谚文
+                    0xF900 <= o <= 0xFAFF):    # CJK 兼容表意文字
+                has_cjk = True
+            elif ch.isascii() and ch.isalpha():
+                has_latin = True
+        if has_cjk:
+            return 'chinese'
+        return 'english' if has_latin else None
+
+    def _apply_mode_for_line(self, text):
+        """确定当前句生效的渲染模式并写入 _line_mode
+
+        mode='auto' 时按句判定（无有效文字则兜底中文式）；
+        否则强制使用全局模式。
+        """
+        if self.mode == 'auto':
+            self._line_mode = self._detect_line_mode(text) or 'chinese'
+        else:
+            self._line_mode = self.mode
 
     def _compute_place_constraints(self):
         """计算文本放置相关的所有约束，供 wrap_text 和 place_randomly 共用
@@ -279,6 +317,8 @@ class LyricWindow(QMainWindow):
         self.stroke_width = stroke_width; self.angle_min = angle_min; self.angle_max = angle_max
         self.margin_time = margin_time; self.max_interval = max_interval; self.max_duration = max_duration
         self.mode = mode; self.spacing = spacing
+        # 全局模式变化后先同步到当前句（后续逐句由 _activate_line 刷新）
+        self._apply_mode_for_line(text)
         self.shake_intensity = shake_intensity; self.shake_speed = shake_speed
         self.fade_speed = fade_speed; self.rise_speed = rise_speed
         self.glow = glow; self.glow_color = glow_color
@@ -286,6 +326,7 @@ class LyricWindow(QMainWindow):
         self.lyric_timeline = parse_lrc(text); self.fading_lines = []
         if not self.lyric_timeline:
             logger.info("未解析到时间轴，按纯文本逐字播放")
+            self._apply_mode_for_line(text)
             self.wrapped_lines = self.wrap_text(text, self._get_max_text_width())
             self.full_text = text; self.char_index = 0
             self.init_char_shakes(); self.place_randomly()
@@ -416,7 +457,7 @@ class LyricWindow(QMainWindow):
                 if self.full_text and self.char_index > 0:
                     fading = FadingLine(self.wrapped_lines, self.font, self.x, self.y, self.angle,
                         self.text_color, self.stroke_color, self.stroke_width,
-                        self.mode, self.spacing, self.shake_intensity,
+                        self._line_mode, self.spacing, self.shake_intensity,
                         self.fade_speed, self.rise_speed,
                         self.glow, self.glow_color, self.glow_size, self.glow_alpha,
                         self.persp_transform)
@@ -430,7 +471,7 @@ class LyricWindow(QMainWindow):
                     if self.full_text and self.char_index > 0:
                         fading = FadingLine(self.wrapped_lines, self.font, self.x, self.y, self.angle,
                             self.text_color, self.stroke_color, self.stroke_width,
-                            self.mode, self.spacing, self.shake_intensity,
+                            self._line_mode, self.spacing, self.shake_intensity,
                             self.fade_speed, self.rise_speed,
                             self.glow, self.glow_color, self.glow_size, self.glow_alpha,
                             self.persp_transform)
@@ -474,6 +515,7 @@ class LyricWindow(QMainWindow):
     def _activate_line(self, idx):
         """激活第 idx 行：设置文本、折叠、随机位置与逐字动画速度"""
         line_text = self.lyric_timeline[idx][1]
+        self._apply_mode_for_line(line_text)
         self.full_text = line_text; self.char_index = 0
         self.wrapped_lines = self.wrap_text(line_text, self._get_max_text_width())
         self.init_char_shakes(); self.place_randomly()
@@ -611,7 +653,7 @@ class LyricWindow(QMainWindow):
         if self.perspective_enabled:
             painter.setTransform(self.persp_transform, True)
         painter.translate(self.x, self.y)
-        if self.mode == 'chinese':
+        if self._line_mode == 'chinese':
             shadow_c = QColor(self.stroke_color); text_c = QColor(self.text_color)
         else:
             stroke_c = QColor(self.stroke_color); fill_c = QColor(self.text_color)
@@ -645,7 +687,7 @@ class LyricWindow(QMainWindow):
                     pen_g = QPen(gc, self.glow_size)
                     painter.setPen(pen_g); painter.setBrush(Qt.NoBrush)
                     painter.drawPath(path_glow)
-                if self.mode == 'chinese':
+                if self._line_mode == 'chinese':
                     path_shadow = QPainterPath()
                     path_shadow.addText(ox + sx + 3, oy + sy + 3 + th/3, self.font, ch)
                     painter.setPen(Qt.NoPen); painter.setBrush(shadow_c)
