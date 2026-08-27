@@ -242,6 +242,12 @@ class FetcherBySMTC(Fetcher):
         self._last_pos: float | None = None
         self._last_sample_t: float | None = None
         self._stalled_count: int = 0
+        # 会话（重）绑定后是否见过进度前进。网易云的 SMTC position 常恒为 0
+        # 或陈旧值（客户端不随播放更新），绑定初期读到的 0 是伪值：若直接喂给
+        # 歌词窗会触发"进度回落重定位"把歌词拽回开头，之后内部计时也只能从
+        # 错误的 0 基准继续，歌词与音乐完全脱节。因此绑定后须先观察到一次
+        # 前进才信任 position，否则一律返回 None 让上层衔接内部计时
+        self._pos_ever_advanced: bool = False
 
     # ---- 生命周期 ----
     def start(self) -> None:
@@ -298,24 +304,40 @@ class FetcherBySMTC(Fetcher):
         可能一直停在 0 或陈旧值。播放中按挂钟时间判定停滞：position 前进量
         明显低于实际采样间隔即判定进度失效，返回 (None, duration) 让上层
         立即回退内部计时，避免歌词冻在陈旧进度上产生延迟感。
+        会话（重）绑定后未见过进度前进期间同样返回 None（见 _pos_ever_advanced）。
         """
         position, duration = self._read_timeline()
         if position is None:
             return None, duration
         if not self._is_playing:
+            # 暂停中：已信任则返回冻结位置；未信任则同样不喂（伪 0 防护）
+            if not self._pos_ever_advanced:
+                logger.debug(
+                    "SMTC 绑定后进度未见前进（position=%ss），暂不信任，回退内部计时",
+                    position,
+                )
+                return None, duration
             return position, duration
         # 播放中：position 应随时间前进。按实际采样间隔判定是否停滞，
-        # 避免事件循环抖动导致两次采样间隔过短而误判
+        # 避免事件循环抖动导致两次采样间隔过短而误判。
+        # 先做前进检测（首次前进即解锁信任），再应用未信任守卫
         now = time.monotonic()
         if self._last_pos is not None and self._last_sample_t is not None:
             dt = now - self._last_sample_t
             if dt >= 0.05:
                 if position - self._last_pos >= dt * 0.3:
                     self._stalled_count = 0
+                    self._pos_ever_advanced = True
                 else:
                     self._stalled_count += 1
         self._last_pos = position
         self._last_sample_t = now
+        if not self._pos_ever_advanced:
+            logger.debug(
+                "SMTC 绑定后进度未见前进（position=%ss），暂不信任，回退内部计时",
+                position,
+            )
+            return None, duration
         if self._stalled_count >= 2:
             logger.debug(
                 "SMTC 播放进度停滞（position=%ss），回退内部计时",
@@ -385,6 +407,12 @@ class FetcherBySMTC(Fetcher):
                 logger.debug("移除旧 SMTC 会话监听失败", exc_info=True)
         self.session = matched
         logger.info("SMTC 会话已建立：%s", self.session.source_app_user_model_id)
+        # 新会话的进度历史不可沿用：重置位置保护状态，绑定后需重新观察
+        # 到进度前进才再次信任 position（否则可能继承上个会话的陈旧基准）
+        self._last_pos = None
+        self._last_sample_t = None
+        self._stalled_count = 0
+        self._pos_ever_advanced = False
         self._media_props_token = self.session.add_media_properties_changed(self.on_media_changed)
         self._playback_token = self.session.add_playback_info_changed(self.on_playback_changed)
         self._call_on_main(self._schedule_initial_sync)
