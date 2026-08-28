@@ -25,6 +25,10 @@ _WDA_EXCLUDEFROMCAPTURE = 0x00000011
 _HWND_TOPMOST = -1
 # SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE：只提升 z 序，不动位置/尺寸/焦点
 _SWP_ZORDER_ONLY = 0x0001 | 0x0002 | 0x0010
+# 预点亮槽位渐入动画时长（秒，暗态模式）
+_SLOT_FADE_IN = 0.4
+# 预点亮亮态模式下未播放句的逐字显示间隔（毫秒/字，与播放时逐字效果一致）
+_SLOT_REVEAL_MS = 50
 
 
 class LyricWindow(QMainWindow):
@@ -52,6 +56,17 @@ class LyricWindow(QMainWindow):
         self._progress_rewound = False
         # 歌词演出延迟（毫秒）：正值延后显示，负值提前显示，作用于时间基准
         self.lyric_offset_ms = 0
+        # 跟读预点亮：当前句之后保持暗态显示的后续句数（0=关闭，1/2=同屏 2~3 句）
+        # preview_slots 为暗态槽位列表，每项：
+        #   {idx: 时间轴行索引, rows: 折行结果, x, y, angle: 独立位置与角度,
+        #    transform: 该位置的透视变换}
+        # 槽位按行索引左右分区（idx 偶数在左、奇数在右），放置时做碰撞规避
+        # 保证互不重叠；唱到时原地"点亮"（沿用槽位的位置与折行，不重新随机）
+        self.preview_count = 0
+        self.preview_slots = []
+        # 未播放歌词是否保持暗态（True=暗态预点亮；False=亮态常驻，
+        # 唱到时跳过逐字动画直接整句呈现，唱完走现有残影淡出）
+        self.preview_keep_dim = True
         self.full_text = ""; self.char_index = 0
         self.x = 500; self.y = 300; self.angle = 0
         self.char_timer = QTimer(self); self.char_timer.timeout.connect(self.show_next_char)
@@ -339,18 +354,22 @@ class LyricWindow(QMainWindow):
         self.wrapped_lines = []
         self.update(); self.start_time = 0; self.line_timer.start(50)
     def compute_perspective(self):
+        self.persp_transform = self._persp_transform_at(self.x, self.y)
+
+    def _persp_transform_at(self, x, y):
+        """计算任意锚点位置的透视变换（供当前句与暗态预览槽位共用）"""
         if not self.perspective_enabled:
-            self.persp_transform = QTransform()
-            return
-        rel_x = (self.x - self.screen_w / 2) / (self.screen_w / 2)
-        rel_y = (self.y - self.screen_h / 2) / (self.screen_h / 2)
+            return QTransform()
+        rel_x = (x - self.screen_w / 2) / (self.screen_w / 2)
+        rel_y = (y - self.screen_h / 2) / (self.screen_h / 2)
         persp_x = self.persp_x_strength * rel_x
         persp_y = self.persp_y_strength * rel_y
         scale_x = 1.0 + self.persp_compensation * max(0, rel_x)
-        self.persp_transform = QTransform()
-        self.persp_transform.setMatrix(scale_x, 0, persp_x,
-                                       0, 1, persp_y,
-                                       0, 0, 1)
+        t = QTransform()
+        t.setMatrix(scale_x, 0, persp_x,
+                    0, 1, persp_y,
+                    0, 0, 1)
+        return t
     def _get_max_text_width(self):
         """计算单行文本的最大可用宽度（基于屏幕可用宽度，含保守余量）
 
@@ -429,6 +448,112 @@ class LyricWindow(QMainWindow):
         self.angle = random.randint(self.angle_min, self.angle_max)
         self.compute_perspective()
 
+    # ---- 跟读预点亮：暗态槽位的左右分区放置与碰撞规避 ----
+
+    def _rotated_aabb(self, x, y, rows, angle):
+        """计算文本块的轴对齐包围盒 (x0, y0, w, h)，y 为首行基线
+
+        已含发光/阴影余量；旋转按整块刚性旋转近似（与预览行绘制一致）。
+        """
+        c = self._compute_place_constraints()
+        fm = QFontMetrics(self.font)
+        th = fm.height()
+        width = max((self._text_width(r) for r in rows), default=0)
+        height = len(rows) * (th + c['line_spacing'])
+        ar = math.radians(angle)
+        rot_w = width * abs(math.cos(ar)) + height * abs(math.sin(ar))
+        rot_h = width * abs(math.sin(ar)) + height * abs(math.cos(ar))
+        pad = c['glow_margin'] + c['shadow_margin']
+        return (x - pad, y - th - pad, rot_w + 2 * pad, rot_h + 2 * pad)
+
+    def _slot_collides(self, rect):
+        """包围盒是否与当前句或任何存活暗态槽位重叠"""
+        if self.wrapped_lines and self.full_text:
+            if self._rects_overlap(rect, self._rotated_aabb(self.x, self.y, self.wrapped_lines, self.angle)):
+                return True
+        for s in self.preview_slots:
+            if self._rects_overlap(rect, self._rotated_aabb(s['x'], s['y'], s['rows'], s['angle'])):
+                return True
+        return False
+
+    @staticmethod
+    def _rects_overlap(a, b):
+        ax, ay, aw, ah = a
+        bx, by, bw, bh = b
+        return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
+
+    def _spawn_preview_slot(self, idx):
+        """为第 idx 句创建暗态槽位：全屏随机放置 + 碰撞规避
+
+        长句（折行后仍很宽）在常规范围放不下时，逐步放宽到屏幕居中兜底，
+        保证任何句子都能生成槽位；碰撞多次失败才允许少量重叠（视觉上
+        优于整句消失）。
+        """
+        rows = self.wrap_text(self.lyric_timeline[idx][1], self._get_max_text_width())
+        if not rows:
+            return
+        c = self._compute_place_constraints()
+        fm = QFontMetrics(self.font)
+        th = fm.height()
+        width = max(self._text_width(r) for r in rows)
+        height = len(rows) * (th + c['line_spacing'])
+        angle = random.randint(self.angle_min, self.angle_max)
+        ar = math.radians(angle)
+        rot_w = width * abs(math.cos(ar)) + height * abs(math.sin(ar))
+        rot_h = width * abs(math.sin(ar)) + height * abs(math.cos(ar))
+
+        sw, sh = c['sw'], c['sh']
+        base = int(c['base_margin'])
+        x_min = max(c['user_x_min'], base + c['persp_extra_x'])
+        x_max = min(c['user_x_max'], sw - int(rot_w) - base - c['persp_extra_x'])
+        y_min = max(c['user_y_min'], int(th) + c['persp_extra_y'])
+        y_max = min(c['user_y_max'], sh - int(rot_h) - int(th) - c['persp_extra_y'])
+        # 常规范围放不下（长句/小屏）：放宽到可用区居中，保证句子不消失
+        if x_max <= x_min:
+            x_min = x_max = max(base + c['persp_extra_x'], int((sw - rot_w) / 2))
+        if y_max <= y_min:
+            y_min = y_max = max(c['user_y_min'], int((sh - rot_h - th) / 2))
+
+        fallback = None
+        for _ in range(40):
+            x = random.randint(x_min, x_max)
+            y = random.randint(y_min, y_max)
+            if fallback is None:
+                fallback = (x, y)
+            if not self._slot_collides(self._rotated_aabb(x, y, rows, angle)):
+                self._add_preview_slot(idx, rows, x, y, angle)
+                return
+        # 全部尝试失败（屏幕拥挤）：用首个候选兜底
+        self._add_preview_slot(idx, rows, fallback[0], fallback[1], angle)
+
+    def _add_preview_slot(self, idx, rows, x, y, angle):
+        self.preview_slots.append({
+            'idx': idx, 'rows': rows, 'x': x, 'y': y, 'angle': angle,
+            'transform': self._persp_transform_at(x, y),
+            'born': time.time(),  # 渐入动画起点
+        })
+
+    def _ensure_preview_slots(self, current_idx):
+        """确保后续 preview_count 句都有暗态槽位，缺失的按分区补齐"""
+        if self.preview_count <= 0 or not self.lyric_timeline:
+            self.preview_slots = []
+            return
+        want = set(range(current_idx + 1,
+                         min(current_idx + 1 + self.preview_count, len(self.lyric_timeline))))
+        self.preview_slots = [s for s in self.preview_slots if s['idx'] in want]
+        for idx in sorted(want - {s['idx'] for s in self.preview_slots}):
+            self._spawn_preview_slot(idx)
+
+    def set_preview_count(self, count):
+        """设置跟读预点亮句数（当前句之后暗态显示的后续句数，0=关闭），播放中立即重排"""
+        self.preview_count = max(0, int(count))
+        if self.full_text and self.lyric_timeline and self.line_timer.isActive():
+            idx = max(0, self.current_line - 1)  # 当前句索引
+            self._ensure_preview_slots(idx)
+        else:
+            self.preview_slots = []
+        self.update()
+
     def check_lyric_time(self):
         # 时间基准：优先使用播放器真实进度（实时适配），否则回退到内部计时；
         # 统一叠加用户设定的演出延迟（正值延后/负值提前，故为减法：
@@ -498,6 +623,7 @@ class LyricWindow(QMainWindow):
         self.fading_lines = []
         self.full_text = ""; self.char_index = 0
         self.wrapped_lines = []
+        self.preview_slots = []
         self.update()
         if elapsed < self.lyric_timeline[0][0]:
             self.current_line = 0
@@ -517,12 +643,31 @@ class LyricWindow(QMainWindow):
         return target
 
     def _activate_line(self, idx):
-        """激活第 idx 行：设置文本、折叠、随机位置与逐字动画速度"""
+        """激活第 idx 行：设置文本、折叠、随机位置与逐字动画速度
+
+        若本句已有暗态预点亮槽位，则原地"点亮"：沿用槽位的位置、角度与
+        折行，不重新随机；否则按原有随机放置。
+        """
         line_text = self.lyric_timeline[idx][1]
         self._apply_mode_for_line(line_text)
         self.full_text = line_text; self.char_index = 0
-        self.wrapped_lines = self.wrap_text(line_text, self._get_max_text_width())
-        self.init_char_shakes(); self.place_randomly()
+        slot = next((s for s in self.preview_slots if s['idx'] == idx), None)
+        # 丢弃进度已跳过的过期槽位（保留的都在本句之后）
+        self.preview_slots = [s for s in self.preview_slots if s['idx'] > idx]
+        if slot is not None:
+            self.wrapped_lines = slot['rows']
+            self.x = slot['x']; self.y = slot['y']; self.angle = slot['angle']
+            self.compute_perspective()
+            self.init_char_shakes()
+            if not self.preview_keep_dim:
+                # 亮态常驻模式下句子早已完整显示：跳过逐字动画直接整句呈现，
+                # 唱完后按现有残影机制正常淡出
+                self.char_index = len(line_text)
+        else:
+            self.wrapped_lines = self.wrap_text(line_text, self._get_max_text_width())
+            self.init_char_shakes(); self.place_randomly()
+        # 点亮消耗了一个槽位，补齐后续句的暗态槽位
+        self._ensure_preview_slots(idx)
         if idx + 1 < len(self.lyric_timeline):
             next_time = self.lyric_timeline[idx + 1][0]
             current_time = self.lyric_timeline[idx][0]
@@ -544,6 +689,7 @@ class LyricWindow(QMainWindow):
         self.current_line = 0; self.char_index = 0
         self.full_text = ""; self.wrapped_lines = []
         self.fading_lines = []; self.update()
+        self.preview_slots = []
         if self.external_time is None:
             self.start_time = time.time() * 1000
 
@@ -613,9 +759,20 @@ class LyricWindow(QMainWindow):
         self.update()
 
     def update_fading(self):
-        if not self.fading_lines: return
-        self.fading_lines = [f for f in self.fading_lines if f.update()]
-        self.update()
+        has_fading = bool(self.fading_lines)
+        if has_fading:
+            self.fading_lines = [f for f in self.fading_lines if f.update()]
+        # 有槽位尚在渐入/逐字显现期间时保持重绘，驱动动画
+        now = time.time()
+        if self.preview_keep_dim:
+            has_animating = any(now - s.get('born', 0.0) < _SLOT_FADE_IN
+                                for s in self.preview_slots)
+        else:
+            has_animating = any(
+                (now - s.get('born', 0.0)) * 1000 < sum(len(r) for r in s['rows']) * _SLOT_REVEAL_MS
+                for s in self.preview_slots)
+        if has_fading or has_animating:
+            self.update()
 
     def stop_lyric(self):
         logger.info("停止歌词显示")
@@ -624,6 +781,7 @@ class LyricWindow(QMainWindow):
         self.lyric_timeline = []; self.current_line = 0
         self.fading_lines = []; self.char_shakes = []
         self.wrapped_lines = []
+        self.preview_slots = []
         self.external_time = None; self._last_external_time = None
         self._progress_rewound = False
         self._paused_at = None; self._pause_requested = False
@@ -661,6 +819,9 @@ class LyricWindow(QMainWindow):
     def paintEvent(self, event):
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
         for f in self.fading_lines: f.draw(painter)
+        # 暗态预点亮槽位画在最底层、且在早退返回之前：
+        # 保证逐字间隙（char_index=0）期间未读句不闪断
+        self._paint_preview_slots(painter)
         if self.char_index == 0 or not self.wrapped_lines: return
         fm = QFontMetrics(self.font)
         th = fm.height(); angle_rad = math.radians(self.angle)
@@ -725,3 +886,73 @@ class LyricWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape: QApplication.quit()
+
+    def _paint_preview_slots(self, painter):
+        """绘制暗态预点亮槽位：后续句在各自分区位置的低亮度静态显示
+
+        绘制方式与当前句/FadingLine 一致（逐字符沿角度排布），保证点亮
+        瞬间渲染无缝切换；新槽位 0.4s 渐入，不逐字不颤动。
+        """
+        if not self.preview_slots:
+            return
+        now = time.time()
+        fm = QFontMetrics(self.font)
+        th = fm.height()
+        line_spacing = th * 0.3
+        for slot in self.preview_slots:
+            if self.preview_keep_dim:
+                # 暗态：整句渐入后保持低亮度
+                fade_in = max(0.0, min(1.0, (now - slot.get('born', 0.0)) / _SLOT_FADE_IN))
+                alpha_factor = 0.35 * fade_in
+                reveal = None  # 显示全部字符
+            else:
+                # 亮态：按播放时的逐字方式显现，显完后常驻
+                alpha_factor = 1.0
+                reveal = int((now - slot.get('born', 0.0)) * 1000 / _SLOT_REVEAL_MS)
+                if reveal <= 0:
+                    continue
+            painter.save()
+            if self.perspective_enabled:
+                painter.setTransform(slot['transform'], True)
+            painter.translate(slot['x'], slot['y'])
+            angle_rad = math.radians(slot['angle'])
+            if self._line_mode == 'chinese':
+                shadow_c = QColor(self.stroke_color); text_c = QColor(self.text_color)
+            else:
+                stroke_c = QColor(self.stroke_color); fill_c = QColor(self.text_color)
+            for line_idx, row in enumerate(slot['rows']):
+                if reveal is not None:
+                    if reveal <= 0:
+                        break
+                    show_count = min(reveal, len(row))
+                    draw_text = row[:show_count]
+                    reveal -= show_count
+                else:
+                    draw_text = row
+                line_y_offset = line_idx * (th + line_spacing)
+                cursor = 0
+                for ch in draw_text:
+                    cw = fm.horizontalAdvance(ch)
+                    ox = cursor * math.cos(angle_rad)
+                    oy = cursor * math.sin(angle_rad) + line_y_offset
+                    if self._line_mode == 'chinese':
+                        shadow_p = QPainterPath()
+                        shadow_p.addText(ox + 3, oy + 3 + th / 3, self.font, ch)
+                        sc = QColor(shadow_c); sc.setAlpha(int(sc.alpha() * alpha_factor))
+                        painter.setPen(Qt.NoPen); painter.setBrush(sc)
+                        painter.drawPath(shadow_p)
+                        text_p = QPainterPath()
+                        text_p.addText(ox, oy + th / 3, self.font, ch)
+                        tc = QColor(text_c); tc.setAlpha(int(tc.alpha() * alpha_factor))
+                        painter.setPen(Qt.NoPen); painter.setBrush(tc)
+                        painter.drawPath(text_p)
+                    else:
+                        stc = QColor(stroke_c); stc.setAlpha(int(stroke_c.alpha() * alpha_factor))
+                        fcc = QColor(fill_c); fcc.setAlpha(int(fcc.alpha() * alpha_factor))
+                        text_p = QPainterPath()
+                        text_p.addText(ox, oy + th / 3, self.font, ch)
+                        pen = QPen(stc, self.stroke_width * 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+                        painter.setPen(pen); painter.setBrush(fcc)
+                        painter.drawPath(text_p)
+                    cursor += cw + self.spacing
+            painter.restore()

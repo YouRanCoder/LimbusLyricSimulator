@@ -142,6 +142,12 @@ class AppController(QObject):
         # 应用已保存的歌词演出延迟（0.1s 精度，正值延后/负值提前）
         self._lyric_window.lyric_offset_ms = int(round(
             self.settings.get_setting('lyric_offset', 0.0) * 1000))
+        # 应用已保存的跟读预点亮句数（当前句之后暗态显示的后续句数，0=关闭）
+        self._lyric_window.preview_count = int(
+            self.settings.get_setting('preview_lines', 0))
+        # 应用已保存的"未播放歌词保持暗态"（False=亮态常驻，唱完正常淡出）
+        self._lyric_window.preview_keep_dim = bool(
+            self.settings.get_setting('preview_keep_dim', True))
 
         # 应用已保存的防捕获设置（独立 Overlay：录屏/直播软件不可见）
         if self.settings.get_setting('exclude_from_capture', False):
@@ -512,6 +518,21 @@ class AppController(QObject):
         self.settings.set_setting('lyric_offset', seconds)
         if self._lyric_window:
             self._lyric_window.set_lyric_offset_ms(int(round(seconds * 1000)))
+
+    def set_preview_lines(self, count: int) -> None:
+        """设置跟读预点亮句数（当前句之后暗态显示的后续句数，0=关闭），实时生效并持久化"""
+        logger.info("设置跟读预点亮句数：%d", count)
+        self.settings.set_setting('preview_lines', int(count))
+        if self._lyric_window:
+            self._lyric_window.set_preview_count(int(count))
+
+    def set_preview_keep_dim(self, keep_dim: bool) -> None:
+        """设置未播放歌词是否保持暗态（False=亮态常驻显示，唱到直接呈现、唱完正常淡出）"""
+        logger.info("设置未播放歌词保持暗态：%s", keep_dim)
+        self.settings.set_setting('preview_keep_dim', bool(keep_dim))
+        if self._lyric_window:
+            self._lyric_window.preview_keep_dim = bool(keep_dim)
+            self._lyric_window.update()
 
     def set_exclude_from_capture(self, enabled: bool) -> None:
         """设置歌词窗口防捕获（独立 Overlay：录屏/直播软件不可见）"""

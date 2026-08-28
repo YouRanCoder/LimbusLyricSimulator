@@ -35,6 +35,16 @@ class TimelinePage:
         self.offset_spin.setSuffix(" s")
         self.offset_spin.setValue(0.0)
 
+        # 跟读预点亮：当前句之后保持暗态显示的后续句数（索引即句数，0=关闭）
+        self.preview_combo = ComboBox()
+        self.preview_combo.addItems(["关闭", "同屏 2 句（左右分区）", "同屏 3 句（左右分区）"])
+
+        # 未播放歌词是否保持暗态；取消勾选时以正常亮态常驻显示，唱完后正常淡出
+        dim_card, self.preview_dim_check = switch_card(
+            FluentIcon.BRIGHTNESS, "未播放歌词保持暗态",
+            content="取消勾选时未播放歌词正常亮态常驻显示，唱到后直接呈现，唱完正常淡出",
+            checked=True)
+
         self.margin_spin = SpinBox()
         self.margin_spin.setRange(0, 5000)
         self.margin_spin.setSingleStep(100)
@@ -52,6 +62,9 @@ class TimelinePage:
             FluentIcon.QUIET_HOURS, "启动延时", self.delay_combo))
         timeline_group.addSettingCard(widget_card(
             FluentIcon.HISTORY, "演出延迟（负值提前）", self.offset_spin))
+        timeline_group.addSettingCard(widget_card(
+            FluentIcon.LABEL, "跟读预点亮", self.preview_combo))
+        timeline_group.addSettingCard(dim_card)
         timeline_group.addSettingCard(widget_card(
             FluentIcon.STOP_WATCH, "留白（ms）", self.margin_spin))
         timeline_group.addSettingCard(widget_card(
