@@ -149,6 +149,8 @@ class ControlPanel(FluentWindow):
             t.max_interval_spin.setValue(settings.get_setting('max_interval', 16000))
             t.max_duration_spin.setValue(settings.get_setting('max_duration', 5000))
             t.offset_spin.setValue(settings.get_setting('lyric_offset', 0.0))
+            t.preview_combo.setCurrentIndex(settings.get_setting('preview_lines', 0))
+            t.preview_dim_check.setChecked(settings.get_setting('preview_keep_dim', True))
             n.angle_min.setValue(settings.get_setting('angle_min', -10))
             n.angle_max.setValue(settings.get_setting('angle_max', 10))
             t.pos_x_min_s.setValue(settings.get_setting('pos_x_min', 5))
@@ -196,6 +198,8 @@ class ControlPanel(FluentWindow):
             'max_interval': t.max_interval_spin.value(),
             'max_duration': t.max_duration_spin.value(),
             'lyric_offset': t.offset_spin.value(),
+            'preview_lines': t.preview_combo.currentIndex(),
+            'preview_keep_dim': t.preview_dim_check.isChecked(),
             'angle_min': n.angle_min.value(),
             'angle_max': n.angle_max.value(),
             'pos_x_min': t.pos_x_min_s.value(),
@@ -306,6 +310,12 @@ class ControlPanel(FluentWindow):
 
         # 歌词演出延迟：调整时实时生效并持久化
         t.offset_spin.valueChanged.connect(self.controller.set_lyric_offset)
+
+        # 跟读预点亮：切换时实时生效并持久化（下拉框索引即后续句数）
+        t.preview_combo.currentIndexChanged.connect(self.controller.set_preview_lines)
+
+        # 未播放歌词保持暗态：切换时实时生效并持久化
+        t.preview_dim_check.checkedChanged.connect(self.controller.set_preview_keep_dim)
 
         # 起始位置范围
         t.pos_x_min_s.valueChanged.connect(
