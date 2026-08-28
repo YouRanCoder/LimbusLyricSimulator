@@ -46,9 +46,13 @@ def make_scroll_page(object_name: str = "page") -> tuple:
     return page, vbox
 
 
-def slider_card(icon, title, minimum, maximum, value, suffix=""):
-    """滑块设置卡片，返回 (card, slider, value_label)"""
-    card = SettingCard(icon, title)
+def slider_card(icon, title, minimum, maximum, value, suffix="", content=None):
+    """滑块设置卡片，返回 (card, slider, value_label)
+
+    Args:
+        content: 卡片副标题说明，传值后卡片高度自动从 50 变为 70，与 Fluent 原生 SettingCard 行为一致
+    """
+    card = SettingCard(icon, title, content)
     slider = Slider(Qt.Horizontal)
     slider.setRange(minimum, maximum)
     slider.setValue(value)

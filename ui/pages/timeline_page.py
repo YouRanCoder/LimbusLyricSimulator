@@ -23,7 +23,9 @@ class TimelinePage:
 
         # ---- 时间轴 ----
         loop_card, self.loop_check = switch_card(
-            FluentIcon.SYNC, "单曲循环", checked=True)
+            FluentIcon.SYNC, "单曲循环",
+            content="无播放器进度时（如酷狗/QQ）播完一首歌是否从头重播；有进度的播放器由播放器自身的循环模式决定",
+            checked=True)
 
         # 歌词演出延迟：正值延后显示，负值提前显示，0.1s 精度实时生效
         self.offset_spin = DoubleSpinBox()
@@ -36,11 +38,14 @@ class TimelinePage:
         # 跟读预点亮：当前句之后保持暗态显示的后续句数（索引即句数，0=关闭）
         self.preview_combo = ComboBox()
         self.preview_combo.addItems(["关闭", "同屏 2 句（左右分区）", "同屏 3 句（左右分区）"])
+        preview_card = widget_card(
+            FluentIcon.LABEL, "跟读预点亮", self.preview_combo,
+            content="在当前句之后以暗态提前显示后续 N 句，方便跟读；开启后歌词改用左右分区布局")
 
         # 未播放歌词是否保持暗态；取消勾选时以正常亮态常驻显示，唱完后正常淡出
         dim_card, self.preview_dim_check = switch_card(
             FluentIcon.BRIGHTNESS, "未播放歌词保持暗态",
-            content="取消勾选时未播放歌词正常亮态常驻显示，唱到后直接呈现，唱完正常淡出",
+            content="开启时跟读预点亮的歌词呈暗态，唱到再点亮；关闭时预点亮歌词以正常亮态常驻显示，唱到后直接呈现、唱完正常淡出",
             checked=True)
 
         self.margin_spin = SpinBox()
@@ -59,8 +64,7 @@ class TimelinePage:
         timeline_group.addSettingCard(widget_card(
             FluentIcon.HISTORY, "演出延迟（负值提前）", self.offset_spin,
             content="整首歌歌词相对实际进度的偏移：正值整体延后，负值整体提前，0.1s 精度实时生效；如需「切歌后等几秒再开始」效果，可直接用正值"))
-        timeline_group.addSettingCard(widget_card(
-            FluentIcon.LABEL, "跟读预点亮", self.preview_combo))
+        timeline_group.addSettingCard(preview_card)
         timeline_group.addSettingCard(dim_card)
         timeline_group.addSettingCard(widget_card(
             FluentIcon.STOP_WATCH, "留白（ms）", self.margin_spin,
@@ -91,5 +95,6 @@ class TimelinePage:
     def _range_row(self, minimum, maximum, value):
         """单个起止位置滑块，返回 (slider, label, card)"""
         card, slider, label = slider_card(
-            FluentIcon.MOVE, f"位置范围 {minimum}-{maximum}", minimum, maximum, value, suffix="%")
+            FluentIcon.MOVE, f"位置范围 {minimum}-{maximum}", minimum, maximum, value, suffix="%",
+            content="歌词在屏幕上随机放置的坐标区间（占屏幕宽/高百分比）；最小值<最大值，Y 通常留出底部空间避免歌词被任务栏遮挡")
         return slider, label, card

@@ -30,10 +30,12 @@ class AppearancePage:
         self.mode_combo.addItem("中文", userData="chinese")
         self.mode_combo.addItem("英文", userData="english")
 
-        preset_card = widget_card(FluentIcon.LABEL, "预设", self.preset_combo)
+        preset_card = widget_card(FluentIcon.LABEL, "预设", self.preset_combo,
+            content="外观/字体/颜色等组合配置，可保存多套并快速切换")
         preset_card.hBoxLayout.addWidget(self.btn_new)
         preset_card.hBoxLayout.addWidget(self.btn_del)
-        mode_card = widget_card(FluentIcon.EDIT, "模式", self.mode_combo)
+        mode_card = widget_card(FluentIcon.EDIT, "模式", self.mode_combo,
+            content="中英文渲染模式：自动=按句字符判定，中文/英文=强制以对应断行方式渲染")
 
         preset_group = SettingCardGroup("预设与模式", self.page)
         preset_group.addSettingCard(preset_card)
@@ -50,7 +52,8 @@ class AppearancePage:
 
         font_card = widget_card(FluentIcon.ALBUM, "字体", self.font_combo)
         size_card = widget_card(FluentIcon.ZOOM_IN, "字号", self.font_size)
-        auto_card = widget_card(FluentIcon.BRUSH, "自动选择推荐字体", self.btn_auto_font)
+        auto_card = widget_card(FluentIcon.BRUSH, "自动选择推荐字体", self.btn_auto_font,
+            content="按当前系统语言自动选择匹配的推荐字体（中文系统选中文/日文/英文字体）")
 
         font_group = SettingCardGroup("字体", self.page)
         font_group.addSettingCard(font_card)
@@ -72,8 +75,10 @@ class AppearancePage:
         color_group = SettingCardGroup("颜色", self.page)
         color_group.addSettingCard(widget_card(FluentIcon.PALETTE, "文字颜色", self.color_btn))
         color_group.addSettingCard(widget_card(FluentIcon.PALETTE, "阴影颜色", self.stroke_btn))
-        color_group.addSettingCard(widget_card(FluentIcon.BRUSH, "描边粗细（px）", self.stroke_spin))
-        color_group.addSettingCard(widget_card(FluentIcon.MOVE, "字间距（px）", self.spacing_spin))
+        color_group.addSettingCard(widget_card(FluentIcon.BRUSH, "描边粗细（px）", self.stroke_spin,
+            content="文字轮廓（描边）的宽度：0=无描边，值越大轮廓越粗"))
+        color_group.addSettingCard(widget_card(FluentIcon.MOVE, "字间距（px）", self.spacing_spin,
+            content="逐字动画时每个字符之间的额外间距：负值=字符重叠，0=紧贴，正值=拉开"))
 
         self.vbox.addWidget(preset_group)
         self.vbox.addWidget(font_group)

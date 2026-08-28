@@ -34,14 +34,15 @@ class PlaybackPage:
         self.source_combo = ComboBox()
         self.source_combo.addItems(["网易云", "QQ音乐", "酷狗"])
 
-        player_card = widget_card(FluentIcon.WIFI, "播放器", self.player_combo)
+        player_card = widget_card(FluentIcon.WIFI, "播放器", self.player_combo,
+            content="当前使用的音乐播放器；右侧三个图标按钮依次为 新增 / 编辑 / 删除。SMTC 会读取其播放状态与元信息")
         player_card.hBoxLayout.addWidget(self.btn_add_p)
         player_card.hBoxLayout.addWidget(self.btn_edit_p)
         player_card.hBoxLayout.addWidget(self.btn_del_p)
 
         netease_card, self.netease_adapter_check = switch_card(
             FluentIcon.CONNECT, "使用网易云适配",
-            "勾选=网易云日志适配器，取消=SMTC（适用于 inflink-rs 等第三方插件）",
+            "勾选=网易云日志适配器（依赖 netease-cloudmusic-detector），取消=SMTC（适用于 inflink-rs 等第三方插件）",
             checked=True)
         pure_card, self.filter_pure_music_check = switch_card(
             FluentIcon.BROOM, "过滤纯音乐/伴奏",
@@ -55,7 +56,8 @@ class PlaybackPage:
         player_group = SettingCardGroup("播放器", self.page)
         player_group.addSettingCard(player_card)
         player_group.addSettingCard(widget_card(
-            FluentIcon.ALBUM, "歌词源", self.source_combo))
+            FluentIcon.ALBUM, "歌词源", self.source_combo,
+            content="歌词搜索/获取的来源词库：网易云=网易云音乐 API；QQ音乐=QQ 音乐 API；酷狗=酷狗 API。三者都需联网"))
         player_group.addSettingCard(netease_card)
         player_group.addSettingCard(pure_card)
         player_group.addSettingCard(credits_card)
