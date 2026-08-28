@@ -47,7 +47,6 @@ class LyricSettings:
     glow_color: Optional[QColor] = None
     glow_size: int = 4
     glow_alpha: int = 82
-    start_delay: int = 0
     loop: bool = True
     # 歌词起始位置范围（百分比，0~100）
     pos_x_min: int = 5
@@ -421,7 +420,6 @@ class AppController(QObject):
             lyric_settings.glow_color,
             lyric_settings.glow_size,
             lyric_settings.glow_alpha,
-            start_delay=lyric_settings.start_delay
         )
         # 若播放器支持进度查询，用真实播放进度驱动歌词时间轴
         self._start_progress_sync()

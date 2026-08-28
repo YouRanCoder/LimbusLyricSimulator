@@ -161,8 +161,6 @@ class ControlPanel(FluentWindow):
             idx = p.source_combo.findText(source_name)
             if idx >= 0:
                 p.source_combo.setCurrentIndex(idx)
-            delay_idx = settings.get_setting('delay', 0)
-            t.delay_combo.setCurrentIndex(delay_idx)
             t.zoom_slider.setValue(settings.get_setting('zoom', 100))
         except Exception:
             logger.warning("加载设置失败，部分控件使用默认值", exc_info=True)
@@ -208,7 +206,6 @@ class ControlPanel(FluentWindow):
             'pos_y_max': t.pos_y_max_s.value(),
             'player': p.player_combo.currentText(),
             'source': p.source_combo.currentText(),
-            'delay': t.delay_combo.currentIndex(),
             'perspective_enabled': n.perspective_check.isChecked(),
             'persp_x_strength': n.persp_x_slider.value(),
             'persp_y_strength': n.persp_y_slider.value(),
@@ -583,7 +580,6 @@ class ControlPanel(FluentWindow):
 
         font = QFont(a.font_combo.currentText(), a.font_size.value(), QFont.Bold)
         mode = a.mode_combo.currentData()
-        delay = int(t.delay_combo.currentText().replace('s', ''))
 
         lyric_settings = LyricSettings(
             text=text,
@@ -606,7 +602,6 @@ class ControlPanel(FluentWindow):
             glow_color=n.glow_color_btn.color,
             glow_size=n.glow_size_slider.value(),
             glow_alpha=n.glow_alpha_slider.value(),
-            start_delay=delay,
             loop=t.loop_check.isChecked(),
             pos_x_min=t.pos_x_min_s.value(),
             pos_x_max=t.pos_x_max_s.value(),

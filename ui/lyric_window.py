@@ -50,7 +50,7 @@ class LyricWindow(QMainWindow):
         self.fade_speed = 12; self.rise_speed = 1
         self.glow = True; self.glow_color = QColor("#d8a523")
         self.glow_size = 4; self.glow_alpha = 82
-        self.loop = True; self.song_duration = 0; self.start_delay = 0
+        self.loop = True; self.song_duration = 0
         # 播放器真实进度（毫秒，None 表示内部计时）；_last_external_time 用于检测进度回落（seek/循环）
         self.external_time = None; self._last_external_time = None
         self._progress_rewound = False
@@ -307,20 +307,9 @@ class LyricWindow(QMainWindow):
     def start_lyric(self, text, font, color, stroke_color, stroke_width,
                     angle_min, angle_max, margin_time, max_interval, max_duration,
                     mode, spacing, shake_intensity, shake_speed,
-                    fade_speed, rise_speed, glow, glow_color, glow_size, glow_alpha,
-                    start_delay=0):
-        logger.info("开始显示歌词：字符数=%d，模式=%s，启动延时=%ds",
-                    len(text), mode, start_delay)
-        self.start_delay = start_delay
-        if self.start_delay > 0:
-            self.full_text = ""; self.char_index = 0
-            self.lyric_timeline = []; self.update()
-            QTimer.singleShot(int(self.start_delay * 1000),
-                lambda: self._actually_start(text, font, color, stroke_color, stroke_width,
-                    angle_min, angle_max, margin_time, max_interval, max_duration,
-                    mode, spacing, shake_intensity, shake_speed,
-                    fade_speed, rise_speed, glow, glow_color, glow_size, glow_alpha))
-            return
+                    fade_speed, rise_speed, glow, glow_color, glow_size, glow_alpha):
+        logger.info("开始显示歌词：字符数=%d，模式=%s",
+                    len(text), mode)
         self._actually_start(text, font, color, stroke_color, stroke_width,
             angle_min, angle_max, margin_time, max_interval, max_duration,
             mode, spacing, shake_intensity, shake_speed,

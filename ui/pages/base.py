@@ -71,9 +71,13 @@ def switch_card(icon, title, content=None, checked=False):
     return card, switch
 
 
-def widget_card(icon, title, widget):
-    """普通控件设置卡片，返回 card（控件已放入卡片右侧）"""
-    card = SettingCard(icon, title)
+def widget_card(icon, title, widget, content=None):
+    """普通控件设置卡片，返回 card（控件已放入卡片右侧）
+
+    Args:
+        content: 卡片副标题说明，传值后卡片高度自动从 50 变为 70，与 Fluent 原生 SettingCard 行为一致
+    """
+    card = SettingCard(icon, title, content)
     card.hBoxLayout.addStretch(1)
     card.hBoxLayout.addWidget(widget)
     return card

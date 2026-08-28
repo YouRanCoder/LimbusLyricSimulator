@@ -24,8 +24,6 @@ class TimelinePage:
         # ---- 时间轴 ----
         loop_card, self.loop_check = switch_card(
             FluentIcon.SYNC, "单曲循环", checked=True)
-        self.delay_combo = ComboBox()
-        self.delay_combo.addItems(["0s", "1s", "2s", "3s", "5s"])
 
         # 歌词演出延迟：正值延后显示，负值提前显示，0.1s 精度实时生效
         self.offset_spin = DoubleSpinBox()
@@ -59,18 +57,20 @@ class TimelinePage:
         timeline_group.addSettingCard(zoom_card)
         timeline_group.addSettingCard(loop_card)
         timeline_group.addSettingCard(widget_card(
-            FluentIcon.QUIET_HOURS, "启动延时", self.delay_combo))
-        timeline_group.addSettingCard(widget_card(
-            FluentIcon.HISTORY, "演出延迟（负值提前）", self.offset_spin))
+            FluentIcon.HISTORY, "演出延迟（负值提前）", self.offset_spin,
+            content="整首歌歌词相对实际进度的偏移：正值整体延后，负值整体提前，0.1s 精度实时生效；如需「切歌后等几秒再开始」效果，可直接用正值"))
         timeline_group.addSettingCard(widget_card(
             FluentIcon.LABEL, "跟读预点亮", self.preview_combo))
         timeline_group.addSettingCard(dim_card)
         timeline_group.addSettingCard(widget_card(
-            FluentIcon.STOP_WATCH, "留白（ms）", self.margin_spin))
+            FluentIcon.STOP_WATCH, "留白（ms）", self.margin_spin,
+            content="每句逐字动画开始前的静默时间，让「歌已开口」与「字出现」之间留出缓冲，避免字比唱先蹦出来"))
         timeline_group.addSettingCard(widget_card(
-            FluentIcon.STOP_WATCH, "长间隔阈值（ms）", self.max_interval_spin))
+            FluentIcon.STOP_WATCH, "长间隔阈值（ms）", self.max_interval_spin,
+            content="当相邻两行歌词的时间间隔超过此值时，判定为间奏/纯音乐段；超过后第一句不再按剩余时间均分字速"))
         timeline_group.addSettingCard(widget_card(
-            FluentIcon.STOP_WATCH, "长间隔时长（ms）", self.max_duration_spin))
+            FluentIcon.STOP_WATCH, "长间隔时长（ms）", self.max_duration_spin,
+            content="判定为长间隔时，每个字的目标呈现间隔（即长间隔后的第一句按此值算字速，防止间奏后字蹦得太快）"))
 
         # ---- 起始位置范围（百分比） ----
         self.pos_x_min_s, self.pos_x_lbl, xmin_card = self._range_row(0, 50, 5)
