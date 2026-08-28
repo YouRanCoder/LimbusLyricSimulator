@@ -431,12 +431,13 @@ class LyricWindow(QMainWindow):
 
     def check_lyric_time(self):
         # 时间基准：优先使用播放器真实进度（实时适配），否则回退到内部计时；
-        # 统一叠加用户设定的演出延迟（正值延后/负值提前）
+        # 统一叠加用户设定的演出延迟（正值延后/负值提前，故为减法：
+        # 延迟 +1s 表示行点 1.0s 的歌词在歌曲进度 2.0s 时才激活）
         if self.external_time is not None:
-            elapsed = self.external_time + self.lyric_offset_ms
+            elapsed = self.external_time - self.lyric_offset_ms
         else:
             if self.start_time == 0: self.start_time = time.time() * 1000
-            elapsed = time.time() * 1000 - self.start_time + self.lyric_offset_ms
+            elapsed = time.time() * 1000 - self.start_time - self.lyric_offset_ms
 
         timeline = self.lyric_timeline
         if not timeline:
@@ -552,11 +553,11 @@ class LyricWindow(QMainWindow):
         if self.lyric_timeline and self.line_timer.isActive():
             # 向后调整时行指针不会自动回退，直接按新基准重定位
             if self.external_time is not None:
-                elapsed = self.external_time + ms
+                elapsed = self.external_time - ms
             elif self.start_time:
-                elapsed = time.time() * 1000 - self.start_time + ms
+                elapsed = time.time() * 1000 - self.start_time - ms
             else:
-                elapsed = ms
+                elapsed = -ms
             self._seek_to(elapsed)
 
     def set_external_time(self, ms):
