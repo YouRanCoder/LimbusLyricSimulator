@@ -139,6 +139,10 @@ class AppController(QObject):
         # 初始化歌词服务（此时 fetcher 已存在）
         self.lyric_service = LyricService(self.player_manager.current_fetcher)
 
+        # 应用已保存的歌词演出延迟（0.1s 精度，正值延后/负值提前）
+        self._lyric_window.lyric_offset_ms = int(round(
+            self.settings.get_setting('lyric_offset', 0.0) * 1000))
+
         # 应用已保存的防捕获设置（独立 Overlay：录屏/直播软件不可见）
         if self.settings.get_setting('exclude_from_capture', False):
             self.set_exclude_from_capture(True)
@@ -501,6 +505,13 @@ class AppController(QObject):
         """设置单曲循环"""
         if self._lyric_window:
             self._lyric_window.loop = enabled
+
+    def set_lyric_offset(self, seconds: float) -> None:
+        """设置歌词演出延迟（秒，0.1s 精度，正值延后/负值提前），实时生效并持久化"""
+        logger.info("设置歌词演出延迟：%.1fs", seconds)
+        self.settings.set_setting('lyric_offset', seconds)
+        if self._lyric_window:
+            self._lyric_window.set_lyric_offset_ms(int(round(seconds * 1000)))
 
     def set_exclude_from_capture(self, enabled: bool) -> None:
         """设置歌词窗口防捕获（独立 Overlay：录屏/直播软件不可见）"""

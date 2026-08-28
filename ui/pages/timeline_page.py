@@ -1,7 +1,8 @@
-"""时间页：界面缩放、启动延时、时间轴参数与起始位置范围"""
+"""时间页：界面缩放、启动延时、演出延迟、时间轴参数与起始位置范围"""
 
 from qfluentwidgets import (
     ComboBox,
+    DoubleSpinBox,
     FluentIcon,
     SettingCardGroup,
     SpinBox,
@@ -26,6 +27,14 @@ class TimelinePage:
         self.delay_combo = ComboBox()
         self.delay_combo.addItems(["0s", "1s", "2s", "3s", "5s"])
 
+        # 歌词演出延迟：正值延后显示，负值提前显示，0.1s 精度实时生效
+        self.offset_spin = DoubleSpinBox()
+        self.offset_spin.setRange(-10.0, 10.0)
+        self.offset_spin.setSingleStep(0.1)
+        self.offset_spin.setDecimals(1)
+        self.offset_spin.setSuffix(" s")
+        self.offset_spin.setValue(0.0)
+
         self.margin_spin = SpinBox()
         self.margin_spin.setRange(0, 5000)
         self.margin_spin.setSingleStep(100)
@@ -41,6 +50,8 @@ class TimelinePage:
         timeline_group.addSettingCard(loop_card)
         timeline_group.addSettingCard(widget_card(
             FluentIcon.QUIET_HOURS, "启动延时", self.delay_combo))
+        timeline_group.addSettingCard(widget_card(
+            FluentIcon.HISTORY, "演出延迟（负值提前）", self.offset_spin))
         timeline_group.addSettingCard(widget_card(
             FluentIcon.STOP_WATCH, "留白（ms）", self.margin_spin))
         timeline_group.addSettingCard(widget_card(

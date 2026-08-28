@@ -148,6 +148,7 @@ class ControlPanel(FluentWindow):
             t.margin_spin.setValue(settings.get_setting('margin_time', 4000))
             t.max_interval_spin.setValue(settings.get_setting('max_interval', 16000))
             t.max_duration_spin.setValue(settings.get_setting('max_duration', 5000))
+            t.offset_spin.setValue(settings.get_setting('lyric_offset', 0.0))
             n.angle_min.setValue(settings.get_setting('angle_min', -10))
             n.angle_max.setValue(settings.get_setting('angle_max', 10))
             t.pos_x_min_s.setValue(settings.get_setting('pos_x_min', 5))
@@ -194,6 +195,7 @@ class ControlPanel(FluentWindow):
             'margin_time': t.margin_spin.value(),
             'max_interval': t.max_interval_spin.value(),
             'max_duration': t.max_duration_spin.value(),
+            'lyric_offset': t.offset_spin.value(),
             'angle_min': n.angle_min.value(),
             'angle_max': n.angle_max.value(),
             'pos_x_min': t.pos_x_min_s.value(),
@@ -301,6 +303,9 @@ class ControlPanel(FluentWindow):
             lambda checked: self.controller.set_loop(checked))
         t.zoom_slider.valueChanged.connect(
             lambda v: (t.zoom_label.setText(f"{v}%"), self.apply_zoom()))
+
+        # 歌词演出延迟：调整时实时生效并持久化
+        t.offset_spin.valueChanged.connect(self.controller.set_lyric_offset)
 
         # 起始位置范围
         t.pos_x_min_s.valueChanged.connect(
