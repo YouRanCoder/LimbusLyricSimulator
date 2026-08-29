@@ -1,4 +1,4 @@
-"""时间页：界面缩放、启动延时、演出延迟、时间轴参数与起始位置范围"""
+"""时间页：演出延迟、时间轴参数与起始位置范围"""
 
 from qfluentwidgets import (
     ComboBox,
@@ -16,10 +16,6 @@ class TimelinePage:
 
     def __init__(self):
         self.page, self.vbox = make_scroll_page("timelinePage")
-
-        # ---- 界面缩放 ----
-        zoom_card, self.zoom_slider, self.zoom_label = slider_card(
-            FluentIcon.ZOOM, "界面缩放", 70, 150, 100, suffix="%")
 
         # ---- 时间轴 ----
 
@@ -55,7 +51,6 @@ class TimelinePage:
         self.max_duration_spin.setSingleStep(500)
 
         timeline_group = SettingCardGroup("时间轴", self.page)
-        timeline_group.addSettingCard(zoom_card)
         timeline_group.addSettingCard(widget_card(
             FluentIcon.HISTORY, "演出延迟（负值提前）", self.offset_spin,
             content="整首歌歌词相对实际进度的偏移：正值整体延后，负值整体提前，0.1s 精度实时生效；如需「切歌后等几秒再开始」效果，可直接用正值"))

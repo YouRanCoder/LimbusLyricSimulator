@@ -69,11 +69,11 @@ class ControlPanel(FluentWindow):
         self.addSubInterface(self._timeline.page, FluentIcon.STOP_WATCH, "时间")
 
         self.setWindowTitle("歌词字幕器 - 控制面板")
-        # 基础尺寸按屏幕分辨率自适应（缩放 100% 时的大小）
+        # 窗口尺寸按屏幕分辨率自适应
         screen = QApplication.primaryScreen().geometry()
-        self._base_w = max(880, min(int(screen.width() * 0.46), 1280))
-        self._base_h = max(640, min(int(screen.height() * 0.55), 960))
-        self.resize(self._base_w, self._base_h)
+        win_w = max(880, min(int(screen.width() * 0.46), 1280))
+        win_h = max(640, min(int(screen.height() * 0.55), 960))
+        self.resize(win_w, win_h)
         self.setStayOnTop(True)
 
         # 从 Controller 获取配置
@@ -85,9 +85,6 @@ class ControlPanel(FluentWindow):
         self._load_settings(settings)
         self._connect_controller_signals()
         self._connect_ui_events()
-
-        # 应用已保存的缩放比例
-        self.apply_zoom()
 
         # 初始化播放器
         player_name = settings.get_setting('player', '网易云音乐')
@@ -160,7 +157,6 @@ class ControlPanel(FluentWindow):
             idx = p.source_combo.findText(source_name)
             if idx >= 0:
                 p.source_combo.setCurrentIndex(idx)
-            t.zoom_slider.setValue(settings.get_setting('zoom', 100))
         except Exception:
             logger.warning("加载设置失败，部分控件使用默认值", exc_info=True)
 
@@ -208,7 +204,6 @@ class ControlPanel(FluentWindow):
             'persp_x_strength': n.persp_x_slider.value(),
             'persp_y_strength': n.persp_y_slider.value(),
             'persp_compensation': n.persp_comp_slider.value(),
-            'zoom': t.zoom_slider.value(),
         }
 
     # ---- Controller 信号 ----
@@ -297,10 +292,6 @@ class ControlPanel(FluentWindow):
         n.rise_speed_slider.valueChanged.connect(
             lambda v: n.rise_speed_label.setText(str(v)))
 
-        # 缩放
-        t.zoom_slider.valueChanged.connect(
-            lambda v: (t.zoom_label.setText(f"{v}%"), self.apply_zoom()))
-
         # 歌词演出延迟：调整时实时生效并持久化
         t.offset_spin.valueChanged.connect(self.controller.set_lyric_offset)
 
@@ -343,7 +334,6 @@ class ControlPanel(FluentWindow):
         n.persp_x_label.setText(f"{n.persp_x_slider.value() / 1000000:.6f}")
         n.persp_y_label.setText(f"{n.persp_y_slider.value() / 100000:.5f}")
         n.persp_comp_label.setText(f"{n.persp_comp_slider.value() / 100:.2f}")
-        t.zoom_label.setText(f"{t.zoom_slider.value()}%")
         t.pos_x_lbl.setText(f"{t.pos_x_min_s.value()}%")
         t.pos_x_max_lbl.setText(f"{t.pos_x_max_s.value()}%")
         t.pos_y_lbl.setText(f"{t.pos_y_min_s.value()}%")
@@ -744,14 +734,6 @@ class ControlPanel(FluentWindow):
         self._refresh_preset_list()
 
     # ---- 其他 UI 方法 ----
-
-    def apply_zoom(self) -> None:
-        """应用界面缩放（窗口不超出屏幕范围）"""
-        scale = self._timeline.zoom_slider.value() / 100.0
-        screen = QApplication.primaryScreen().geometry()
-        w = min(int(self._base_w * scale), int(screen.width() * 0.95))
-        h = min(int(self._base_h * scale), int(screen.height() * 0.95))
-        self.resize(w, h)
 
     def auto_select_font(self) -> None:
         """自动选择推荐字体"""
