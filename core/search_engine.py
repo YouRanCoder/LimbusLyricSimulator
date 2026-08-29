@@ -168,11 +168,12 @@ class LyricSearchEngine:
     # ---- 网易云 ID 直查 ----
 
     @classmethod
-    async def fetch_netease_lyric_by_id(cls, song_id: int, need_trans: bool = False):
+    async def fetch_netease_lyric_by_id(cls, song_id: int):
         """通过网易云歌曲 ID 直查歌词（elog 适配器提供精确 ID 时使用）
 
         主接口 song/media 结构简单、对 VIP/无版权歌曲更宽松；
-        该接口不带翻译，「仅翻译」模式时补调 song/lyric 接口获取。
+        该接口不带翻译，另调 song/lyric 接口取翻译一并返回，
+        以便「仅翻译」与「中英双语」模式能直接复用，由 search() 出口选择。
 
         Returns:
             (原始歌词, 翻译歌词) 或 None（ID 无效/无歌词/请求失败）
@@ -186,14 +187,13 @@ class LyricSearchEngine:
                 logger.info("网易云 ID 直查无歌词：id=%s（可能为云盘歌曲）", song_id)
                 return None
             tlyric = ''
-            if need_trans:
-                try:
-                    resp2 = await cls._get(
-                        f"http://music.163.com/api/song/lyric?id={int(song_id)}&lv=1&kv=1&tv=-1")
-                    raw = resp2.json().get('tlyric')
-                    tlyric = raw.get('lyric', '') if isinstance(raw, dict) else ''
-                except Exception:
-                    logger.debug("网易云 ID 直查补取翻译失败：id=%s", song_id, exc_info=True)
+            try:
+                resp2 = await cls._get(
+                    f"http://music.163.com/api/song/lyric?id={int(song_id)}&lv=1&kv=1&tv=-1")
+                raw = resp2.json().get('tlyric')
+                tlyric = raw.get('lyric', '') if isinstance(raw, dict) else ''
+            except Exception:
+                logger.debug("网易云 ID 直查补取翻译失败：id=%s", song_id, exc_info=True)
             logger.info("网易云 ID 直查歌词成功：id=%d，原始 %d 字符，翻译 %d 字符",
                         song_id, len(lrc), len(tlyric))
             return lrc, tlyric
@@ -316,8 +316,8 @@ class LyricSearchEngine:
             # elog 适配器提供了有效歌曲 ID：直查歌词接口（精确，绕过模糊搜索），
             # 失败（无词/无效 ID/网络异常）再回退文本搜索
             if song_id and int(song_id) > 0:
-                got = await cls.fetch_netease_lyric_by_id(int(song_id),
-                                                          need_trans=trans_only)
+                # 直查接口同时返回原文与翻译，由 search() 出口按 trans_only/bilingual 选择
+                got = await cls.fetch_netease_lyric_by_id(int(song_id))
                 if got:
                     lrc, tlyric = got
                     # 直查接口不返回时长，返回 0 让上层沿用播放器上报的真实时长
