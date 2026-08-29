@@ -73,6 +73,10 @@ def merge_bilingual_lyric(lrc: str, tlyric: str, max_gap_ms: int = 500) -> str:
                     best_idx, best_dist = k, dist
             k += 1
         if best_idx is not None:
+            # 若配对翻译文本与原文高度相似（去掉所有非字母数字字符后相同，
+            # 覆盖「同句歌词被写两遍/原译数字串仅标点差异」等场景），跳过翻译行
+            if _normalize_for_dedup(trans[best_idx][1]) == _normalize_for_dedup(text):
+                continue
             matched_trans.add(best_idx)
             lines.append(f"[{_fmt_ts(ms)}]{trans[best_idx][1]}")
 
@@ -84,9 +88,41 @@ def merge_bilingual_lyric(lrc: str, tlyric: str, max_gap_ms: int = 500) -> str:
         lines.append(f"[{_fmt_ts(ms)}]{text}")
 
     merged = '\n'.join(lines)
+    # 去重：相邻行时间戳与文本完全相同时跳过（部分歌词源会把同一行写两遍，
+    # 合并后会在原/译同位置出现重复显示）
+    deduped = _dedup_adjacent(merged)
+    if len(deduped) < len(merged.split('\n')):
+        logger.info("合并歌词去重：%d 行 → %d 行",
+                    len(merged.split('\n')), len(deduped.split('\n')))
     logger.info("中英双语合并完成：原始 %d 行，翻译 %d 行，合并后 %d 行",
-                len(origin), len(trans), len(lines))
-    return merged
+                len(origin), len(trans), len(deduped.split('\n')))
+    return deduped
+
+
+def _dedup_adjacent(lrc_text: str) -> str:
+    """去掉相邻的完全重复行（时间戳+文本都相同），保留首条
+
+    仅在原歌词与翻译歌词里同一行被写两次时生效，正常双语配对
+    （同一时间戳原文+译文）不受影响。
+    """
+    if not lrc_text:
+        return lrc_text
+    result = []
+    for line in lrc_text.split('\n'):
+        if result and line.strip() == result[-1].strip():
+            continue
+        result.append(line)
+    return '\n'.join(result)
+
+
+def _normalize_for_dedup(s: str) -> str:
+    """合并去重用规范化：仅保留字母与数字并小写
+
+    比「去空白后相等」更激进，专门覆盖「同句歌词被写两遍」「原文与
+    翻译只是标点/省略号/千位分隔符不同」等场景；正常双语配对
+    （中文 vs 英文）规范化后必不相等，不会误伤。
+    """
+    return re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", s or "").lower()
 
 
 def _fmt_ts(ms: int) -> str:
