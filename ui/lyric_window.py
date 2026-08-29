@@ -246,11 +246,20 @@ class LyricWindow(QMainWindow):
         """将长文本按可用宽度自动折叠为多行
 
         使用逐字符测量（与渲染一致）确保精确；边界保守，避免溢出 1-2 个字符。
+        中英双语配对的文本以 \n 分隔原文与译文，先按段拆分再逐段折叠，
+        保证原文与译文各自独立折行显示。
         """
         if not text:
             return []
         if max_width <= 0:
             return [text]
+
+        # 双语配对文本：按换行符分段，各自独立折行
+        if '\n' in text:
+            lines = []
+            for part in text.split('\n'):
+                lines.extend(self.wrap_text(part, max_width))
+            return lines
 
         # 整行放得下就直接返回
         if self._text_width(text) <= max_width:
@@ -580,7 +589,8 @@ class LyricWindow(QMainWindow):
                         self.persp_transform)
                     self.fading_lines = [fading]  # 只保留跳转前一句，清掉更早残影
                 self._activate_line(target)
-                self.current_line = target + 1
+                # 跳过同时间戳的配对翻译行（双语合并已由 _activate_line 处理）
+                self.current_line = self._advance_past_pair(target)
             else:
                 # 正常逐句推进（一次一行）
                 while (self.current_line < len(timeline) and
@@ -594,7 +604,8 @@ class LyricWindow(QMainWindow):
                             self.persp_transform)
                         self.fading_lines.append(fading)
                     self._activate_line(self.current_line)
-                    self.current_line += 1
+                    # 跳过同时间戳的配对翻译行（双语合并已由 _activate_line 处理）
+                    self.current_line = self._advance_past_pair(self.current_line)
 
         # 播完处理
         if self.current_line >= len(timeline):
@@ -612,7 +623,8 @@ class LyricWindow(QMainWindow):
             return
         target = self._find_line_index(elapsed)
         self._activate_line(target)
-        self.current_line = target + 1
+        # 跳过同时间戳的配对翻译行（双语合并已由 _activate_line 处理）
+        self.current_line = self._advance_past_pair(target)
 
     def _find_line_index(self, elapsed):
         """返回 elapsed 时刻应显示的行索引（最后一个 t <= elapsed 的行）"""
@@ -624,13 +636,41 @@ class LyricWindow(QMainWindow):
                 break
         return target
 
+    def _line_text_at(self, idx):
+        """返回第 idx 行的显示文本
+
+        双语配对（两行同时间戳）时按一对显示：若本行是配对翻译行
+        （与上一行同时间戳）则以原文行（idx-1）为锚点；
+        若下一行是配对翻译行，则拼接为两行一起返回。
+        """
+        if self._skip_paired_line(idx):
+            idx = idx - 1
+        text = self.lyric_timeline[idx][1]
+        if (idx + 1 < len(self.lyric_timeline) and
+                self.lyric_timeline[idx + 1][0] == self.lyric_timeline[idx][0]):
+            text = text + '\n' + self.lyric_timeline[idx + 1][1]
+        return text
+
+    def _skip_paired_line(self, idx):
+        """若 idx 是配对行（与上一行同时间戳），返回 True 并跳过"""
+        return (idx > 0 and
+                self.lyric_timeline[idx][0] == self.lyric_timeline[idx - 1][0])
+
+    def _advance_past_pair(self, idx):
+        """从 idx 前进到配对行之后（跳过同时间戳的后续行）"""
+        while (idx + 1 < len(self.lyric_timeline) and
+               self.lyric_timeline[idx + 1][0] == self.lyric_timeline[idx][0]):
+            idx += 1
+        return idx + 1
+
     def _activate_line(self, idx):
         """激活第 idx 行：设置文本、折叠、随机位置与逐字动画速度
 
         若本句已有暗态预点亮槽位，则原地"点亮"：沿用槽位的位置、角度与
         折行，不重新随机；否则按原有随机放置。
+        若下一行时间戳相同（双语配对），自动合并为两行显示。
         """
-        line_text = self.lyric_timeline[idx][1]
+        line_text = self._line_text_at(idx)
         self._apply_mode_for_line(line_text)
         self.full_text = line_text; self.char_index = 0
         slot = next((s for s in self.preview_slots if s['idx'] == idx), None)

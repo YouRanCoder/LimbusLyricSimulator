@@ -5,10 +5,131 @@ import re
 
 logger = logging.getLogger(__name__)
 
+_LRC_LINE = re.compile(r'\[(\d+):(\d+)(?:[.:](\d+))?\](.*)')
+
 
 def _normalize_text(s: str) -> str:
     """比对用规范化：小写并去除所有空白字符"""
     return re.sub(r"\s+", "", s or "").lower()
+
+
+def _parse_lrc_lines(lrc_text: str) -> list:
+    """把 LRC 文本解析为 [(毫秒, 文本), ...]，已按时间排序"""
+    result = []
+    if not lrc_text:
+        return result
+    for line in lrc_text.split('\n'):
+        match = _LRC_LINE.match(line.strip())
+        if not match:
+            continue
+        m, s = int(match.group(1)), int(match.group(2))
+        frac = match.group(3)
+        text = match.group(4).strip()
+        if not text:
+            continue
+        ms = (m * 60 + s) * 1000
+        if frac:
+            if len(frac) >= 3:
+                ms += int(frac[:3])
+            elif len(frac) == 2:
+                ms += int(frac) * 10
+            else:
+                ms += int(frac) * 100
+        result.append((ms, text))
+    result.sort(key=lambda x: x[0])
+    return result
+
+
+def merge_bilingual_lyric(lrc: str, tlyric: str, max_gap_ms: int = 500) -> str:
+    """把原始歌词与翻译歌词合并为「中英同时演出」的单条时间轴
+
+    使用双指针贪心匹配：对每个原始行，在其时间戳前后各 max_gap_ms 范围内
+    找最近的翻译行，命中后输出 [原始行, 翻译行] 两条连续时间行使其同时显示；
+    每条翻译行只匹配一次（先到先得）。找不到匹配翻译的原始行只输出原文，
+    未被匹配的翻译行按自身时间戳兜底输出。
+    """
+    origin = _parse_lrc_lines(lrc)
+    trans = _parse_lrc_lines(tlyric)
+    if not origin:
+        return tlyric or ""
+    if not trans:
+        return lrc or ""
+
+    lines = []
+    matched_trans = set()  # 已匹配的翻译行索引
+    j = 0  # 翻译行游标（trans 已按时间排序）
+    for ms, text in origin:
+        lines.append(f"[{_fmt_ts(ms)}]{text}")
+        # 向前推进游标到不早于 ms - max_gap 的翻译行
+        while j < len(trans) and trans[j][0] < ms - max_gap_ms:
+            j += 1
+        # 在 [ms - max_gap, ms + max_gap] 内挑选最接近的未使用翻译行
+        best_idx, best_dist = None, max_gap_ms + 1
+        k = j
+        while k < len(trans) and trans[k][0] <= ms + max_gap_ms:
+            if k not in matched_trans:
+                dist = abs(trans[k][0] - ms)
+                if dist < best_dist:
+                    best_idx, best_dist = k, dist
+            k += 1
+        if best_idx is not None:
+            # 若配对翻译文本与原文高度相似（去掉所有非字母数字字符后相同，
+            # 覆盖「同句歌词被写两遍/原译数字串仅标点差异」等场景），跳过翻译行
+            if _normalize_for_dedup(trans[best_idx][1]) == _normalize_for_dedup(text):
+                continue
+            matched_trans.add(best_idx)
+            lines.append(f"[{_fmt_ts(ms)}]{trans[best_idx][1]}")
+
+    # 兜底：未被匹配且不与任何原始行相近的翻译行，按自身时间戳输出
+    orphan_trans = [t for i, t in enumerate(trans)
+                    if i not in matched_trans
+                    and not any(abs(t[0] - oms) <= max_gap_ms for oms, _ in origin)]
+    for ms, text in orphan_trans:
+        lines.append(f"[{_fmt_ts(ms)}]{text}")
+
+    merged = '\n'.join(lines)
+    # 去重：相邻行时间戳与文本完全相同时跳过（部分歌词源会把同一行写两遍，
+    # 合并后会在原/译同位置出现重复显示）
+    deduped = _dedup_adjacent(merged)
+    if len(deduped) < len(merged.split('\n')):
+        logger.info("合并歌词去重：%d 行 → %d 行",
+                    len(merged.split('\n')), len(deduped.split('\n')))
+    logger.info("中英双语合并完成：原始 %d 行，翻译 %d 行，合并后 %d 行",
+                len(origin), len(trans), len(deduped.split('\n')))
+    return deduped
+
+
+def _dedup_adjacent(lrc_text: str) -> str:
+    """去掉相邻的完全重复行（时间戳+文本都相同），保留首条
+
+    仅在原歌词与翻译歌词里同一行被写两次时生效，正常双语配对
+    （同一时间戳原文+译文）不受影响。
+    """
+    if not lrc_text:
+        return lrc_text
+    result = []
+    for line in lrc_text.split('\n'):
+        if result and line.strip() == result[-1].strip():
+            continue
+        result.append(line)
+    return '\n'.join(result)
+
+
+def _normalize_for_dedup(s: str) -> str:
+    """合并去重用规范化：仅保留字母与数字并小写
+
+    比「去空白后相等」更激进，专门覆盖「同句歌词被写两遍」「原文与
+    翻译只是标点/省略号/千位分隔符不同」等场景；正常双语配对
+    （中文 vs 英文）规范化后必不相等，不会误伤。
+    """
+    return re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", s or "").lower()
+
+
+def _fmt_ts(ms: int) -> str:
+    """毫秒转 LRC 时间标签 [mm:ss.xx]"""
+    total_s = max(0, ms) // 1000
+    frac = (max(0, ms) % 1000) // 10
+    return f"{total_s // 60:02d}:{total_s % 60:02d}.{frac:02d}"
 
 
 def _strip_brackets(s: str) -> str:
@@ -83,11 +204,12 @@ class LyricSearchEngine:
     # ---- 网易云 ID 直查 ----
 
     @classmethod
-    async def fetch_netease_lyric_by_id(cls, song_id: int, need_trans: bool = False):
+    async def fetch_netease_lyric_by_id(cls, song_id: int):
         """通过网易云歌曲 ID 直查歌词（elog 适配器提供精确 ID 时使用）
 
         主接口 song/media 结构简单、对 VIP/无版权歌曲更宽松；
-        该接口不带翻译，「仅翻译」模式时补调 song/lyric 接口获取。
+        该接口不带翻译，另调 song/lyric 接口取翻译一并返回，
+        以便「仅翻译」与「中英双语」模式能直接复用，由 search() 出口选择。
 
         Returns:
             (原始歌词, 翻译歌词) 或 None（ID 无效/无歌词/请求失败）
@@ -101,14 +223,13 @@ class LyricSearchEngine:
                 logger.info("网易云 ID 直查无歌词：id=%s（可能为云盘歌曲）", song_id)
                 return None
             tlyric = ''
-            if need_trans:
-                try:
-                    resp2 = await cls._get(
-                        f"http://music.163.com/api/song/lyric?id={int(song_id)}&lv=1&kv=1&tv=-1")
-                    raw = resp2.json().get('tlyric')
-                    tlyric = raw.get('lyric', '') if isinstance(raw, dict) else ''
-                except Exception:
-                    logger.debug("网易云 ID 直查补取翻译失败：id=%s", song_id, exc_info=True)
+            try:
+                resp2 = await cls._get(
+                    f"http://music.163.com/api/song/lyric?id={int(song_id)}&lv=1&kv=1&tv=-1")
+                raw = resp2.json().get('tlyric')
+                tlyric = raw.get('lyric', '') if isinstance(raw, dict) else ''
+            except Exception:
+                logger.debug("网易云 ID 直查补取翻译失败：id=%s", song_id, exc_info=True)
             logger.info("网易云 ID 直查歌词成功：id=%d，原始 %d 字符，翻译 %d 字符",
                         song_id, len(lrc), len(tlyric))
             return lrc, tlyric
@@ -222,17 +343,17 @@ class LyricSearchEngine:
 
     @classmethod
     async def search(cls, song_name, artist="", source="网易云", trans_only=False,
-                     song_id=0, duration_ms=0):
-        logger.info("开始搜索歌词：歌名=%s，歌手=%s，来源=%s，仅翻译=%s，歌曲ID=%s",
-                    song_name, artist, source, trans_only, song_id or "无")
+                     song_id=0, duration_ms=0, bilingual=False):
+        logger.info("开始搜索歌词：歌名=%s，歌手=%s，来源=%s，仅翻译=%s，中英双语=%s，歌曲ID=%s",
+                    song_name, artist, source, trans_only, bilingual, song_id or "无")
         lrc = tlyric = None
         duration = 0
         if source == "网易云":
             # elog 适配器提供了有效歌曲 ID：直查歌词接口（精确，绕过模糊搜索），
             # 失败（无词/无效 ID/网络异常）再回退文本搜索
             if song_id and int(song_id) > 0:
-                got = await cls.fetch_netease_lyric_by_id(int(song_id),
-                                                          need_trans=trans_only)
+                # 直查接口同时返回原文与翻译，由 search() 出口按 trans_only/bilingual 选择
+                got = await cls.fetch_netease_lyric_by_id(int(song_id))
                 if got:
                     lrc, tlyric = got
                     # 直查接口不返回时长，返回 0 让上层沿用播放器上报的真实时长
@@ -246,16 +367,31 @@ class LyricSearchEngine:
             lrc, tlyric, duration = await cls.search_kugou(song_name, artist, duration_ms)
         else:
             logger.warning("未知歌词源：%s", source)
-            return None, 0
+            return None, 0, False
 
+        if bilingual:
+            # 双语模式：要求同时有原文与翻译，缺一则回退到单语（不报错）
+            if lrc and lrc.strip() and tlyric and tlyric.strip():
+                merged = merge_bilingual_lyric(lrc, tlyric)
+                logger.info("返回中英双语合并歌词，时长 %dms", duration)
+                return merged, duration, False
+            logger.info("中英双语无可用翻译，回退到单语显示（原=%s，翻=%s）",
+                        bool(lrc and lrc.strip()),
+                        bool(tlyric and tlyric.strip()))
+            if lrc and lrc.strip():
+                return lrc, duration, True
+            if tlyric and tlyric.strip():
+                return tlyric, duration, True
+            logger.warning("中英双语回退也无歌词：%s", song_name)
+            return None, duration, True
         if trans_only and tlyric and tlyric.strip():
             logger.info("返回翻译歌词，时长 %dms", duration)
-            return tlyric, duration
+            return tlyric, duration, False
         if lrc and lrc.strip():
             logger.info("返回原始歌词，时长 %dms", duration)
-            return lrc, duration
+            return lrc, duration, False
         if tlyric and tlyric.strip():
             logger.info("返回翻译歌词（兜底），时长 %dms", duration)
-            return tlyric, duration
+            return tlyric, duration, False
         logger.warning("歌词搜索无结果：%s", song_name)
-        return None, duration
+        return None, duration, False

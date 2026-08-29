@@ -143,6 +143,9 @@ class AppController(QObject):
         # 应用已保存的跟读预点亮句数（当前句之后暗态显示的后续句数，0=关闭）
         self._lyric_window.preview_count = int(
             self.settings.get_setting('preview_lines', 0))
+        # 中英双语模式下强制关闭预先读取（跟读预点亮），避免与双语同屏互相干扰
+        if self.settings.get_setting('bilingual_mode', False):
+            self._lyric_window.preview_count = 0
         # 应用已保存的"未播放歌词保持暗态"（False=亮态常驻，唱完正常淡出）
         self._lyric_window.preview_keep_dim = bool(
             self.settings.get_setting('preview_keep_dim', True))
@@ -220,17 +223,25 @@ class AppController(QObject):
                 return False
 
             logger.info("开始获取歌词：来源=%s，仅翻译=%s", source, trans_only)
+            bilingual = bool(self.settings.get_setting('bilingual_mode', False))
             result = await self.lyric_service.fetch_lyric_with_fallback(
                 source=source,
                 trans_only=trans_only,
-                manual_input_callback=manual_input_callback
+                manual_input_callback=manual_input_callback,
+                bilingual=bilingual,
             )
 
             if result.success:
                 lyric = self.filter_credit_lines(result.lyric)
                 logger.info("歌词获取成功：%s - %s，时长 %dms", result.song, result.artist, result.duration_ms)
                 self.lyric_fetched.emit(lyric, result.duration_ms, result.song, result.artist)
-                self.status_changed.emit(f"状态：已获取「{result.song}」的歌词")
+                # 双语模式拿到原文但没有翻译时已自动回退到单语，状态栏明示
+                if result.fell_back_from_bilingual:
+                    self.status_changed.emit(
+                        f"状态：已获取「{result.song}」的歌词（无翻译，已回退单语显示）"
+                    )
+                else:
+                    self.status_changed.emit(f"状态：已获取「{result.song}」的歌词")
                 return True
             else:
                 if not result.song and not result.artist:
@@ -522,6 +533,26 @@ class AppController(QObject):
         if self._lyric_window:
             self._lyric_window.preview_keep_dim = bool(keep_dim)
             self._lyric_window.update()
+
+    def set_bilingual_mode(self, enabled: bool) -> None:
+        """设置中英双语同时演出（勾选后原始歌词与翻译歌词同时显示）
+
+        双语演出时预先读取（跟读预点亮）会分散两行注意力且同屏互相遮挡，
+        故开启双语时自动强制关闭预先读取；关闭双语时恢复为用户原设置。
+        """
+        logger.info("设置中英双语同时演出：%s", enabled)
+        self.settings.set_setting('bilingual_mode', bool(enabled))
+        if enabled:
+            # 记住用户原有的预先读取句数，关闭双语时恢复
+            if self.settings.get_setting('preview_lines', 0) > 0:
+                self.settings.set_setting('bilingual_prev_preview', int(
+                    self.settings.get_setting('preview_lines', 0)))
+            self.set_preview_lines(0)
+        else:
+            prev = self.settings.get_setting('bilingual_prev_preview', 0)
+            self.settings.set_setting('bilingual_prev_preview', 0)
+            if prev > 0:
+                self.set_preview_lines(prev)
 
     def set_exclude_from_capture(self, enabled: bool) -> None:
         """设置歌词窗口防捕获（独立 Overlay：录屏/直播软件不可见）"""
