@@ -47,7 +47,6 @@ class LyricSettings:
     glow_color: Optional[QColor] = None
     glow_size: int = 4
     glow_alpha: int = 82
-    loop: bool = True
     # 歌词起始位置范围（百分比，0~100）
     pos_x_min: int = 5
     pos_x_max: int = 85
@@ -391,9 +390,8 @@ class AppController(QObject):
             logger.warning("歌词窗口未初始化")
             return
         
-        logger.info("开始播放歌词：模式=%s，字符数=%d，循环=%s",
-                    lyric_settings.mode, len(lyric_settings.text), lyric_settings.loop)
-        self._lyric_window.loop = lyric_settings.loop
+        logger.info("开始播放歌词：模式=%s，字符数=%d",
+                    lyric_settings.mode, len(lyric_settings.text))
         # 应用歌词起始位置范围
         self._lyric_window.pos_x_min = lyric_settings.pos_x_min
         self._lyric_window.pos_x_max = lyric_settings.pos_x_max
@@ -466,8 +464,6 @@ class AppController(QObject):
                 # 进度不可用（SMTC 停滞/读取失败）：切回内部计时并衔接，
                 # 避免 external_time 停留在陈旧值导致歌词被钉死
                 self._lyric_window.switch_to_internal_timing()
-            if duration:
-                self._lyric_window.song_duration = int(duration * 1000)
         except Exception:
             logger.debug("读取播放器进度失败", exc_info=True)
 
@@ -504,11 +500,6 @@ class AppController(QObject):
         """设置透视补偿"""
         if self._lyric_window:
             self._lyric_window.persp_compensation = value
-    
-    def set_loop(self, enabled: bool) -> None:
-        """设置单曲循环"""
-        if self._lyric_window:
-            self._lyric_window.loop = enabled
 
     def set_lyric_offset(self, seconds: float) -> None:
         """设置歌词演出延迟（秒，0.1s 精度，正值延后/负值提前），实时生效并持久化"""
@@ -560,11 +551,6 @@ class AppController(QObject):
         """设置歌词起始 Y 最大值（百分比）"""
         if self._lyric_window:
             self._lyric_window.pos_y_max = value
-    
-    def set_song_duration(self, duration_ms: int) -> None:
-        """设置歌曲时长"""
-        if self._lyric_window:
-            self._lyric_window.song_duration = duration_ms
 
     def filter_credit_lines(self, text: str) -> str:
         """过滤掉歌词中的编曲作词等标注行"""

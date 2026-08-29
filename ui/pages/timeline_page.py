@@ -22,10 +22,6 @@ class TimelinePage:
             FluentIcon.ZOOM, "界面缩放", 70, 150, 100, suffix="%")
 
         # ---- 时间轴 ----
-        loop_card, self.loop_check = switch_card(
-            FluentIcon.SYNC, "单曲循环",
-            content="无播放器进度时（如酷狗/QQ）播完一首歌是否从头重播；有进度的播放器由播放器自身的循环模式决定",
-            checked=True)
 
         # 歌词演出延迟：正值延后显示，负值提前显示，0.1s 精度实时生效
         self.offset_spin = DoubleSpinBox()
@@ -60,7 +56,6 @@ class TimelinePage:
 
         timeline_group = SettingCardGroup("时间轴", self.page)
         timeline_group.addSettingCard(zoom_card)
-        timeline_group.addSettingCard(loop_card)
         timeline_group.addSettingCard(widget_card(
             FluentIcon.HISTORY, "演出延迟（负值提前）", self.offset_spin,
             content="整首歌歌词相对实际进度的偏移：正值整体延后，负值整体提前，0.1s 精度实时生效；如需「切歌后等几秒再开始」效果，可直接用正值"))

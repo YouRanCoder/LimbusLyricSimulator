@@ -50,7 +50,6 @@ class LyricWindow(QMainWindow):
         self.fade_speed = 12; self.rise_speed = 1
         self.glow = True; self.glow_color = QColor("#d8a523")
         self.glow_size = 4; self.glow_alpha = 82
-        self.loop = True; self.song_duration = 0
         # 播放器真实进度（毫秒，None 表示内部计时）；_last_external_time 用于检测进度回落（seek/循环）
         self.external_time = None; self._last_external_time = None
         self._progress_rewound = False
@@ -599,13 +598,7 @@ class LyricWindow(QMainWindow):
 
         # 播完处理
         if self.current_line >= len(timeline):
-            if self.loop and self.song_duration > 0:
-                # 内部模式：内部计时走完一首歌后循环重播；
-                # 外部模式靠回落检测（_progress_rewound）触发循环，这里不再处理
-                if self.external_time is None and elapsed >= self.song_duration:
-                    self._reset_playback()
-            else:
-                self.line_timer.stop()
+            self.line_timer.stop()
 
     def _seek_to(self, elapsed):
         """外部进度回落（seek 回退/单曲循环归零）后，重新定位到 elapsed 对应的行"""

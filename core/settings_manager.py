@@ -185,7 +185,6 @@ class SettingsManager:
             'glow_enabled': True,
             'glow_size': 4,
             'glow_alpha': 82,
-            'loop': True,
             'trans_only': False,
             # 渲染模式：'auto'=按句判定（CJK→阴影式/纯拉丁→描边式），'chinese'/'english'=强制统一
             'mode': 'auto',

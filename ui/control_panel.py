@@ -119,7 +119,6 @@ class ControlPanel(FluentWindow):
             n.glow_check.setChecked(settings.get_setting('glow_enabled', True))
             n.glow_size_slider.setValue(settings.get_setting('glow_size', 4))
             n.glow_alpha_slider.setValue(settings.get_setting('glow_alpha', 82))
-            t.loop_check.setChecked(settings.get_setting('loop', True))
             n.perspective_check.setChecked(settings.get_setting('perspective_enabled', True))
             n.persp_x_slider.setValue(settings.get_setting('persp_x_strength', 5))
             n.persp_y_slider.setValue(settings.get_setting('persp_y_strength', 30))
@@ -175,7 +174,6 @@ class ControlPanel(FluentWindow):
             'glow_enabled': n.glow_check.isChecked(),
             'glow_size': n.glow_size_slider.value(),
             'glow_alpha': n.glow_alpha_slider.value(),
-            'loop': t.loop_check.isChecked(),
             'trans_only': p.trans_check.isChecked(),
             'autostart_enabled': p.autostart_check.isChecked(),
             'close_behavior': p.close_behavior_combo.currentData(),
@@ -299,9 +297,7 @@ class ControlPanel(FluentWindow):
         n.rise_speed_slider.valueChanged.connect(
             lambda v: n.rise_speed_label.setText(str(v)))
 
-        # 循环 / 缩放
-        t.loop_check.checkedChanged.connect(
-            lambda checked: self.controller.set_loop(checked))
+        # 缩放
         t.zoom_slider.valueChanged.connect(
             lambda v: (t.zoom_label.setText(f"{v}%"), self.apply_zoom()))
 
@@ -602,7 +598,6 @@ class ControlPanel(FluentWindow):
             glow_color=n.glow_color_btn.color,
             glow_size=n.glow_size_slider.value(),
             glow_alpha=n.glow_alpha_slider.value(),
-            loop=t.loop_check.isChecked(),
             pos_x_min=t.pos_x_min_s.value(),
             pos_x_max=t.pos_x_max_s.value(),
             pos_y_min=t.pos_y_min_s.value(),
@@ -724,7 +719,6 @@ class ControlPanel(FluentWindow):
         """歌词获取成功"""
         logger.info("歌词已填充到输入框：%s - %s，时长 %dms", song, artist, duration_ms)
         self._playback.text_input.setPlainText(lyric)
-        self.controller.set_song_duration(duration_ms)
 
     def _on_player_list_updated(self, player_names: list) -> None:
         """播放器列表更新"""
