@@ -49,6 +49,10 @@ class PlaybackPage:
             FluentIcon.FILTER, "自动略过编曲作词", checked=True)
         trans_card, self.trans_check = switch_card(
             FluentIcon.ROBOT, "仅获取翻译歌词", checked=False)
+        bilingual_card, self.bilingual_check = switch_card(
+            FluentIcon.LANGUAGE, "中英双语同时演出",
+            "勾选后原始歌词与翻译歌词同时显示（需歌词源提供翻译）；开启时自动关闭跟读预点亮",
+            checked=False)
 
         player_group = SettingCardGroup("播放器", self.page)
         player_group.addSettingCard(player_card)
@@ -58,6 +62,7 @@ class PlaybackPage:
         player_group.addSettingCard(pure_card)
         player_group.addSettingCard(credits_card)
         player_group.addSettingCard(trans_card)
+        player_group.addSettingCard(bilingual_card)
 
         # ---- 歌词输入 ----
         self.text_input = QTextEdit()

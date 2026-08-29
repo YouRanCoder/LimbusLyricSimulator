@@ -5,10 +5,95 @@ import re
 
 logger = logging.getLogger(__name__)
 
+_LRC_LINE = re.compile(r'\[(\d+):(\d+)(?:[.:](\d+))?\](.*)')
+
 
 def _normalize_text(s: str) -> str:
     """比对用规范化：小写并去除所有空白字符"""
     return re.sub(r"\s+", "", s or "").lower()
+
+
+def _parse_lrc_lines(lrc_text: str) -> list:
+    """把 LRC 文本解析为 [(毫秒, 文本), ...]，已按时间排序"""
+    result = []
+    if not lrc_text:
+        return result
+    for line in lrc_text.split('\n'):
+        match = _LRC_LINE.match(line.strip())
+        if not match:
+            continue
+        m, s = int(match.group(1)), int(match.group(2))
+        frac = match.group(3)
+        text = match.group(4).strip()
+        if not text:
+            continue
+        ms = (m * 60 + s) * 1000
+        if frac:
+            if len(frac) >= 3:
+                ms += int(frac[:3])
+            elif len(frac) == 2:
+                ms += int(frac) * 10
+            else:
+                ms += int(frac) * 100
+        result.append((ms, text))
+    result.sort(key=lambda x: x[0])
+    return result
+
+
+def merge_bilingual_lyric(lrc: str, tlyric: str, max_gap_ms: int = 500) -> str:
+    """把原始歌词与翻译歌词合并为「中英同时演出」的单条时间轴
+
+    使用双指针贪心匹配：对每个原始行，在其时间戳前后各 max_gap_ms 范围内
+    找最近的翻译行，命中后输出 [原始行, 翻译行] 两条连续时间行使其同时显示；
+    每条翻译行只匹配一次（先到先得）。找不到匹配翻译的原始行只输出原文，
+    未被匹配的翻译行按自身时间戳兜底输出。
+    """
+    origin = _parse_lrc_lines(lrc)
+    trans = _parse_lrc_lines(tlyric)
+    if not origin:
+        return tlyric or ""
+    if not trans:
+        return lrc or ""
+
+    lines = []
+    matched_trans = set()  # 已匹配的翻译行索引
+    j = 0  # 翻译行游标（trans 已按时间排序）
+    for ms, text in origin:
+        lines.append(f"[{_fmt_ts(ms)}]{text}")
+        # 向前推进游标到不早于 ms - max_gap 的翻译行
+        while j < len(trans) and trans[j][0] < ms - max_gap_ms:
+            j += 1
+        # 在 [ms - max_gap, ms + max_gap] 内挑选最接近的未使用翻译行
+        best_idx, best_dist = None, max_gap_ms + 1
+        k = j
+        while k < len(trans) and trans[k][0] <= ms + max_gap_ms:
+            if k not in matched_trans:
+                dist = abs(trans[k][0] - ms)
+                if dist < best_dist:
+                    best_idx, best_dist = k, dist
+            k += 1
+        if best_idx is not None:
+            matched_trans.add(best_idx)
+            lines.append(f"[{_fmt_ts(ms)}]{trans[best_idx][1]}")
+
+    # 兜底：未被匹配且不与任何原始行相近的翻译行，按自身时间戳输出
+    orphan_trans = [t for i, t in enumerate(trans)
+                    if i not in matched_trans
+                    and not any(abs(t[0] - oms) <= max_gap_ms for oms, _ in origin)]
+    for ms, text in orphan_trans:
+        lines.append(f"[{_fmt_ts(ms)}]{text}")
+
+    merged = '\n'.join(lines)
+    logger.info("中英双语合并完成：原始 %d 行，翻译 %d 行，合并后 %d 行",
+                len(origin), len(trans), len(lines))
+    return merged
+
+
+def _fmt_ts(ms: int) -> str:
+    """毫秒转 LRC 时间标签 [mm:ss.xx]"""
+    total_s = max(0, ms) // 1000
+    frac = (max(0, ms) % 1000) // 10
+    return f"{total_s // 60:02d}:{total_s % 60:02d}.{frac:02d}"
 
 
 def _strip_brackets(s: str) -> str:
@@ -222,9 +307,9 @@ class LyricSearchEngine:
 
     @classmethod
     async def search(cls, song_name, artist="", source="网易云", trans_only=False,
-                     song_id=0, duration_ms=0):
-        logger.info("开始搜索歌词：歌名=%s，歌手=%s，来源=%s，仅翻译=%s，歌曲ID=%s",
-                    song_name, artist, source, trans_only, song_id or "无")
+                     song_id=0, duration_ms=0, bilingual=False):
+        logger.info("开始搜索歌词：歌名=%s，歌手=%s，来源=%s，仅翻译=%s，中英双语=%s，歌曲ID=%s",
+                    song_name, artist, source, trans_only, bilingual, song_id or "无")
         lrc = tlyric = None
         duration = 0
         if source == "网易云":
@@ -248,6 +333,10 @@ class LyricSearchEngine:
             logger.warning("未知歌词源：%s", source)
             return None, 0
 
+        if bilingual and (lrc or tlyric) and (lrc or tlyric).strip():
+            merged = merge_bilingual_lyric(lrc, tlyric)
+            logger.info("返回中英双语合并歌词，时长 %dms", duration)
+            return merged, duration
         if trans_only and tlyric and tlyric.strip():
             logger.info("返回翻译歌词，时长 %dms", duration)
             return tlyric, duration

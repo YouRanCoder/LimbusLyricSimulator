@@ -121,6 +121,7 @@ class ControlPanel(FluentWindow):
             n.persp_y_slider.setValue(settings.get_setting('persp_y_strength', 30))
             n.persp_comp_slider.setValue(settings.get_setting('persp_compensation', 3))
             p.trans_check.setChecked(settings.get_setting('trans_only', False))
+            p.bilingual_check.setChecked(settings.get_setting('bilingual_mode', False))
             p.autostart_check.setChecked(settings.get_setting('autostart_enabled', False))
             close_idx = p.close_behavior_combo.findData(settings.get_setting('close_behavior', 'quit'))
             if close_idx >= 0:
@@ -147,6 +148,9 @@ class ControlPanel(FluentWindow):
             t.offset_spin.setValue(settings.get_setting('lyric_offset', 0.0))
             t.preview_combo.setCurrentIndex(settings.get_setting('preview_lines', 0))
             t.preview_dim_check.setChecked(settings.get_setting('preview_keep_dim', True))
+            # 双语开启时（已保存）在其余控件加载完成后统一同步跟读预点亮 UI
+            if settings.get_setting('bilingual_mode', False):
+                self._sync_bilingual_controls(True)
             n.angle_min.setValue(settings.get_setting('angle_min', -10))
             n.angle_max.setValue(settings.get_setting('angle_max', 10))
             t.pos_x_min_s.setValue(settings.get_setting('pos_x_min', 5))
@@ -171,6 +175,7 @@ class ControlPanel(FluentWindow):
             'glow_size': n.glow_size_slider.value(),
             'glow_alpha': n.glow_alpha_slider.value(),
             'trans_only': p.trans_check.isChecked(),
+            'bilingual_mode': p.bilingual_check.isChecked(),
             'autostart_enabled': p.autostart_check.isChecked(),
             'close_behavior': p.close_behavior_combo.currentData(),
             'netease_adapter_enabled': p.netease_adapter_check.isChecked(),
@@ -244,6 +249,9 @@ class ControlPanel(FluentWindow):
         # 切换歌词源/仅翻译时重新获取歌词（不自动重启）
         p.source_combo.currentTextChanged.connect(self._on_source_changed)
         p.trans_check.checkedChanged.connect(self._on_trans_only_changed)
+
+        # 中英双语同时演出：切换时自动管理跟读预点亮并重新获取歌词
+        p.bilingual_check.checkedChanged.connect(self._on_bilingual_changed)
 
         # 网易云适配方式
         p.netease_adapter_check.checkedChanged.connect(self._on_netease_adapter_changed)
@@ -436,6 +444,37 @@ class ControlPanel(FluentWindow):
             return
         logger.info("切换仅获取翻译歌词，重新获取并播放")
         await self._fetch_and_restart(self._make_manual_input())
+
+    @qasync.asyncSlot()
+    async def _on_bilingual_changed(self) -> None:
+        """切换中英双语同时演出：自动管理跟读预点亮并重新获取歌词"""
+        enabled = self._playback.bilingual_check.isChecked()
+        logger.info("切换中英双语同时演出：%s", enabled)
+        self.controller.set_bilingual_mode(enabled)
+        self._sync_bilingual_controls(enabled)
+        if not self.controller.get_current_media().has_track:
+            return
+        logger.info("中英双语设置变更，重新获取并播放")
+        await self._fetch_and_restart(self._make_manual_input())
+
+    def _sync_bilingual_controls(self, enabled: bool) -> None:
+        """双语开启时同步跟读预点亮 UI 并禁用其控件，关闭时恢复（以配置为准）"""
+        t = self._timeline
+        if enabled:
+            t.preview_combo.blockSignals(True)
+            t.preview_combo.setCurrentIndex(0)
+            t.preview_combo.blockSignals(False)
+            t.preview_combo.setEnabled(False)
+            t.preview_dim_check.setEnabled(False)
+        else:
+            # controller.set_bilingual_mode(False) 已把 preview_lines 恢复为原值，
+            # 这里以配置为唯一事实来源同步 UI
+            restore = int(self.controller.settings.get_setting('preview_lines', 0))
+            t.preview_combo.blockSignals(True)
+            t.preview_combo.setCurrentIndex(restore)
+            t.preview_combo.blockSignals(False)
+            t.preview_combo.setEnabled(True)
+            t.preview_dim_check.setEnabled(True)
 
     @qasync.asyncSlot()
     async def _on_add_player(self) -> None:

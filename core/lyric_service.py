@@ -69,6 +69,7 @@ class LyricService:
         trans_only: bool = False,
         song_id: int = 0,
         duration_ms: int = 0,
+        bilingual: bool = False,
     ) -> Tuple[Optional[str], int]:
         """
         从指定歌词源异步搜索歌词
@@ -80,20 +81,22 @@ class LyricService:
             trans_only: 是否仅获取翻译歌词
             song_id: 网易云歌曲 ID（elog 适配器提供时用于精确直查，0 表示无）
             duration_ms: 播放器上报的真实时长（毫秒），用于候选校验，0 表示未知
+            bilingual: 是否中英双语同时演出（合并原始歌词与翻译歌词）
 
         Returns:
             Tuple[Optional[str], int]: (歌词文本, 时长毫秒)
         """
         return await LyricSearchEngine.search(
             song, artist, source, trans_only,
-            song_id=song_id, duration_ms=duration_ms,
+            song_id=song_id, duration_ms=duration_ms, bilingual=bilingual,
         )
     
     async def fetch_lyric_with_fallback(
         self,
         source: str,
         trans_only: bool,
-        manual_input_callback=None
+        manual_input_callback=None,
+        bilingual: bool = False,
     ) -> LyricResult:
         """
         异步获取当前播放的歌词，支持手动输入兜底
@@ -108,6 +111,7 @@ class LyricService:
             source: 歌词源名称
             trans_only: 是否仅获取翻译歌词
             manual_input_callback: 手动输入回调函数，返回 (song, artist) 或 None
+            bilingual: 是否中英双语同时演出（合并原始歌词与翻译歌词）
             
         Returns:
             LyricResult: 歌词获取结果
@@ -115,8 +119,8 @@ class LyricService:
         # 1. 获取当前媒体信息
         info = self.get_current_media_info()
         song, artist = info.song, info.artist
-        logger.info("获取歌词流程启动：歌曲=%s，歌手=%s，来源=%s，仅翻译=%s",
-                    song, artist, source, trans_only)
+        logger.info("获取歌词流程启动：歌曲=%s，歌手=%s，来源=%s，仅翻译=%s，中英双语=%s",
+                    song, artist, source, trans_only, bilingual)
         
         # 2. 如果获取失败，尝试手动输入
         if not info.has_track:
@@ -138,6 +142,7 @@ class LyricService:
         lyric, duration = await self.search_lyric(
             song, artist, source, trans_only,
             song_id=info.song_id, duration_ms=info.duration_ms,
+            bilingual=bilingual,
         )
         
         # 4. 构建结果

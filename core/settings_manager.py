@@ -186,6 +186,8 @@ class SettingsManager:
             'glow_size': 4,
             'glow_alpha': 82,
             'trans_only': False,
+            # 中英双语同时演出：勾选后原始歌词与翻译歌词同时显示（默认关闭）
+            'bilingual_mode': False,
             # 渲染模式：'auto'=按句判定（CJK→阴影式/纯拉丁→描边式），'chinese'/'english'=强制统一
             'mode': 'auto',
             'font_family': 'Microsoft YaHei',
