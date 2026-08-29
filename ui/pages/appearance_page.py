@@ -30,8 +30,7 @@ class AppearancePage:
         self.mode_combo.addItem("中文", userData="chinese")
         self.mode_combo.addItem("英文", userData="english")
 
-        preset_card = widget_card(FluentIcon.LABEL, "预设", self.preset_combo,
-            content="外观/字体/颜色等组合配置，可保存多套并快速切换")
+        preset_card = widget_card(FluentIcon.LABEL, "预设", self.preset_combo)
         preset_card.hBoxLayout.addWidget(self.btn_new)
         preset_card.hBoxLayout.addWidget(self.btn_del)
         mode_card = widget_card(FluentIcon.EDIT, "模式", self.mode_combo,
@@ -53,7 +52,7 @@ class AppearancePage:
         font_card = widget_card(FluentIcon.ALBUM, "字体", self.font_combo)
         size_card = widget_card(FluentIcon.ZOOM_IN, "字号", self.font_size)
         auto_card = widget_card(FluentIcon.BRUSH, "自动选择推荐字体", self.btn_auto_font,
-            content="按当前系统语言自动选择匹配的推荐字体（中文系统选中文/日文/英文字体）")
+            content="按当前系统语言挑选一套合适的字体作为默认字体")
 
         font_group = SettingCardGroup("字体", self.page)
         font_group.addSettingCard(font_card)
