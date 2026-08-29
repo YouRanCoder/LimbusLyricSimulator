@@ -24,7 +24,9 @@ class LyricResult:
     duration_ms: int = 0
     song: str = ""
     artist: str = ""
-    
+    # 双语模式下无可用翻译而回退到单语（开关不关，下一首仍尝试双语）
+    fell_back_from_bilingual: bool = False
+
     @property
     def success(self) -> bool:
         return bool(self.lyric)
@@ -70,7 +72,7 @@ class LyricService:
         song_id: int = 0,
         duration_ms: int = 0,
         bilingual: bool = False,
-    ) -> Tuple[Optional[str], int]:
+    ) -> Tuple[Optional[str], int, bool]:
         """
         从指定歌词源异步搜索歌词
 
@@ -84,7 +86,7 @@ class LyricService:
             bilingual: 是否中英双语同时演出（合并原始歌词与翻译歌词）
 
         Returns:
-            Tuple[Optional[str], int]: (歌词文本, 时长毫秒)
+            Tuple[Optional[str], int, bool]: (歌词文本, 时长毫秒, 是否双语回退)
         """
         return await LyricSearchEngine.search(
             song, artist, source, trans_only,
@@ -139,20 +141,22 @@ class LyricService:
                 return LyricResult()
         
         # 3. 搜索歌词（携带歌曲 ID 与真实时长：ID 用于网易云精确直查，时长用于候选校验）
-        lyric, duration = await self.search_lyric(
+        lyric, duration, fell_back = await self.search_lyric(
             song, artist, source, trans_only,
             song_id=info.song_id, duration_ms=info.duration_ms,
             bilingual=bilingual,
         )
-        
+
         # 4. 构建结果
         # 优先使用播放器上报的真实时长，否则用搜索接口返回的时长
         duration_ms = info.duration_ms if info.duration > 0 else duration
-        logger.info("歌词获取完成：找到=%s，时长=%dms", bool(lyric), duration_ms)
-        
+        logger.info("歌词获取完成：找到=%s，时长=%dms，双语回退=%s",
+                    bool(lyric), duration_ms, fell_back)
+
         return LyricResult(
             lyric=lyric or "",
             duration_ms=duration_ms,
             song=song,
-            artist=artist
+            artist=artist,
+            fell_back_from_bilingual=fell_back,
         )

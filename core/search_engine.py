@@ -331,20 +331,31 @@ class LyricSearchEngine:
             lrc, tlyric, duration = await cls.search_kugou(song_name, artist, duration_ms)
         else:
             logger.warning("未知歌词源：%s", source)
-            return None, 0
+            return None, 0, False
 
-        if bilingual and (lrc or tlyric) and (lrc or tlyric).strip():
-            merged = merge_bilingual_lyric(lrc, tlyric)
-            logger.info("返回中英双语合并歌词，时长 %dms", duration)
-            return merged, duration
+        if bilingual:
+            # 双语模式：要求同时有原文与翻译，缺一则回退到单语（不报错）
+            if lrc and lrc.strip() and tlyric and tlyric.strip():
+                merged = merge_bilingual_lyric(lrc, tlyric)
+                logger.info("返回中英双语合并歌词，时长 %dms", duration)
+                return merged, duration, False
+            logger.info("中英双语无可用翻译，回退到单语显示（原=%s，翻=%s）",
+                        bool(lrc and lrc.strip()),
+                        bool(tlyric and tlyric.strip()))
+            if lrc and lrc.strip():
+                return lrc, duration, True
+            if tlyric and tlyric.strip():
+                return tlyric, duration, True
+            logger.warning("中英双语回退也无歌词：%s", song_name)
+            return None, duration, True
         if trans_only and tlyric and tlyric.strip():
             logger.info("返回翻译歌词，时长 %dms", duration)
-            return tlyric, duration
+            return tlyric, duration, False
         if lrc and lrc.strip():
             logger.info("返回原始歌词，时长 %dms", duration)
-            return lrc, duration
+            return lrc, duration, False
         if tlyric and tlyric.strip():
             logger.info("返回翻译歌词（兜底），时长 %dms", duration)
-            return tlyric, duration
+            return tlyric, duration, False
         logger.warning("歌词搜索无结果：%s", song_name)
-        return None, duration
+        return None, duration, False

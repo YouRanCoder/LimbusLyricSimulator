@@ -235,7 +235,13 @@ class AppController(QObject):
                 lyric = self.filter_credit_lines(result.lyric)
                 logger.info("歌词获取成功：%s - %s，时长 %dms", result.song, result.artist, result.duration_ms)
                 self.lyric_fetched.emit(lyric, result.duration_ms, result.song, result.artist)
-                self.status_changed.emit(f"状态：已获取「{result.song}」的歌词")
+                # 双语模式拿到原文但没有翻译时已自动回退到单语，状态栏明示
+                if result.fell_back_from_bilingual:
+                    self.status_changed.emit(
+                        f"状态：已获取「{result.song}」的歌词（无翻译，已回退单语显示）"
+                    )
+                else:
+                    self.status_changed.emit(f"状态：已获取「{result.song}」的歌词")
                 return True
             else:
                 if not result.song and not result.artist:
