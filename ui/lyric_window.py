@@ -50,9 +50,11 @@ class LyricWindow(QMainWindow):
         self.fade_speed = 12; self.rise_speed = 1
         self.glow = True; self.glow_color = QColor("#d8a523")
         self.glow_size = 4; self.glow_alpha = 82
-        # 播放器真实进度（毫秒，None 表示内部计时）；_last_external_time 用于检测进度回落（seek/循环）
-        self.external_time = None; self._last_external_time = None
-        self._progress_rewound = False
+        # 播放器真实进度（毫秒，None 表示内部计时）
+        # _applied_external_time: 已应用到时间轴的进度（消费过的值），
+        #                         用于回落检测的基准，避免 200ms 轮询的中间采样把回退吞掉
+        self.external_time = None
+        self._applied_external_time = 0
         # 歌词演出延迟（毫秒）：正值延后显示，负值提前显示，作用于时间基准
         self.lyric_offset_ms = 0
         # 跟读预点亮：当前句之后保持暗态显示的后续句数（0=关闭，1/2=同屏 2~3 句）
@@ -565,13 +567,9 @@ class LyricWindow(QMainWindow):
         if not timeline:
             return
 
-        # 外部进度明显回落（seek 回退/单曲循环归零）：一次性重新定位到对应行。
-        # 只有回落超过阈值（set_external_time 中检测）才触发，避免播放器进度在
-        # 行边界轻微抖动时反复重定位，导致歌词满屏随机跳位（乱飞）。
-        if self.external_time is not None and self._progress_rewound:
-            self._progress_rewound = False  # 只处理一次，防止 line_timer 重复触发
-            self._seek_to(elapsed)
-            return
+        # 外部进度明显回落（seek 回退/单曲循环归零）的重定位在
+        # set_external_time 中已直接处理（不依赖 line_timer 状态），
+        # 这里不再重复 _seek_to。
 
         # 前进：推进到 elapsed 时刻应显示的行
         if (self.current_line < len(timeline) and
@@ -606,9 +604,17 @@ class LyricWindow(QMainWindow):
                     self._activate_line(self.current_line)
                     # 跳过同时间戳的配对翻译行（双语合并已由 _activate_line 处理）
                     self.current_line = self._advance_past_pair(self.current_line)
+            # 同步已应用进度基准：本次消费的 external_time 已落到时间轴上
+            if self.external_time is not None:
+                self._applied_external_time = self.external_time
 
         # 播完处理
         if self.current_line >= len(timeline):
+            # 末尾也要把已应用进度推到当前 external_time：
+            # 之后若发生回拖（单曲循环归零 / 用户手动 seek 回前面），
+            # 起点为真实末尾进度，差值判定才不会因基准过老而漏触发。
+            if self.external_time is not None:
+                self._applied_external_time = self.external_time
             self.line_timer.stop()
 
     def _seek_to(self, elapsed):
@@ -712,6 +718,8 @@ class LyricWindow(QMainWindow):
         self.full_text = ""; self.wrapped_lines = []
         self.fading_lines = []; self.update()
         self.preview_slots = []
+        # 重置已应用进度基准，配合外层下一帧的回退检测归零触发 _seek_to
+        self._applied_external_time = 0
         if self.external_time is None:
             self.start_time = time.time() * 1000
 
@@ -727,19 +735,37 @@ class LyricWindow(QMainWindow):
             else:
                 elapsed = -ms
             self._seek_to(elapsed)
+            # 同步已应用进度基准：offset 调整会改 current_line，
+            # 若不更新 _applied_external_time，下一次回退检测会拿错基准
+            if self.external_time is not None:
+                self._applied_external_time = self.external_time
 
     def set_external_time(self, ms):
         """设置播放器真实进度（毫秒），驱动歌词时间轴实时适配"""
-        # 在 _last_external_time 更新前检测回落（seek/单曲循环），旧值仍可用
-        if (self._last_external_time is not None and
-                ms < self._last_external_time - 500):
+        # 回落检测基准：已应用到时间轴的进度（_applied_external_time），
+        # 用已应用值而不是上次轮询采样，避免 200ms 轮询的中间值把跨越大距离的
+        # 回退（seek 回拖/单曲循环归零）吞掉，导致歌词停在末尾不动。
+        rewound = ms < self._applied_external_time - 500
+        if rewound:
             logger.debug("检测到外部进度回落：%dms -> %dms（seek/循环），重新定位",
-                         self._last_external_time, ms)
+                         self._applied_external_time, ms)
+        # 立即执行重定位：不依赖 line_timer 状态。
+        # 之前逻辑放在 if line_timer.isActive() 内部，但播完时 line_timer 会被
+        # 自身 stop()，导致末尾回拖无法触发 _seek_to，歌词卡死在末句。
+        # 移到这里后，line_timer 已停的尾部也能在回拖时立刻重新定位。
+        if rewound and self.lyric_timeline:
             self.fading_lines = []
-            self._progress_rewound = True
-        else:
-            self._progress_rewound = False
-        self._last_external_time = ms
+            self.external_time = ms
+            elapsed = ms - self.lyric_offset_ms
+            self._seek_to(elapsed)
+            # 同步已应用进度基准，避免下一帧回退检测重复触发
+            self._applied_external_time = ms
+            # 播完自停的 line_timer 在重定位后必须重新启动，
+            # 否则不会推进到重定位到的行（外部进度 timer 是 200ms 一次，但
+            # 当前帧不会再被消费——check_lyric_time 需要 line_timer 驱动逐行推进）
+            if not self.line_timer.isActive():
+                self.line_timer.start(50)
+            return
         self.external_time = ms
         if self.lyric_timeline and self.line_timer.isActive():
             self.check_lyric_time()
@@ -750,7 +776,7 @@ class LyricWindow(QMainWindow):
         把内部计时基准设为「基准时刻 - 最后有效外部进度」，使内部 elapsed
         从最后进度继续推进，而不是从 0 重新开始，避免歌词跳回第一句。
         暂停中以暂停时刻为基准，保证 resume 的暂停补偿不会重复计算。
-        保留 _last_external_time：回退期间若发生 seek 回退/单曲循环，
+        保留 _applied_external_time：回退期间若发生 seek 回退/单曲循环，
         恢复外部进度时仍能触发回落重定位。
         """
         if self.external_time is None:
@@ -759,7 +785,6 @@ class LyricWindow(QMainWindow):
         base = self._paused_at if self._paused_at is not None else time.time() * 1000
         self.start_time = base - self.external_time
         self.external_time = None
-        self._progress_rewound = False
 
     def show_next_char(self):
         total_chars = sum(len(line) for line in self.wrapped_lines)
@@ -804,8 +829,8 @@ class LyricWindow(QMainWindow):
         self.fading_lines = []; self.char_shakes = []
         self.wrapped_lines = []
         self.preview_slots = []
-        self.external_time = None; self._last_external_time = None
-        self._progress_rewound = False
+        self.external_time = None
+        self._applied_external_time = 0
         self._paused_at = None; self._pause_requested = False
         self.update()
 
