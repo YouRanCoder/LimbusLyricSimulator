@@ -676,8 +676,10 @@ class ControlPanel(FluentWindow):
             self.controller.set_exclude_region(None)
             self._update_exclude_region_label()
         else:
+            self.hide()
             self._overlay = RegionSelectOverlay()
             self._overlay.region_selected.connect(self._on_exclude_region_selected)
+            self._overlay.destroyed.connect(self.show)
             self._overlay.showFullScreen()
 
     def _on_exclude_region_selected(self, rect) -> None:
