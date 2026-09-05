@@ -454,11 +454,17 @@ class LyricWindow(QMainWindow):
 
         # self.x 是文本左边缘，self.y 是文本基线位置
         self.angle = random.randint(self.angle_min, self.angle_max)
+        placed = False
         for _ in range(20):
             self.x = random.randint(x_min, x_max)
             self.y = random.randint(y_min, y_max)
             if not self._overlaps_exclude_region(rotated_w, total_height, base):
+                placed = True
                 break
+        # 随机采样全失败时，紧贴禁区边缘放置（保证不落在禁区内）
+        if not placed and self.exclude_region is not None:
+            self._place_adjacent_to_exclude(
+                x_min, x_max, y_min, y_max, rotated_w, total_height, base)
         self.compute_perspective()
 
     def _overlaps_exclude_region(self, text_w, text_h, padding):
@@ -471,6 +477,46 @@ class LyricWindow(QMainWindow):
         tw, th = int(text_w + 2 * padding), int(text_h + 2 * padding)
         return (tx < r.x() + r.width() and tx + tw > r.x() and
                 ty < r.y() + r.height() and ty + th > r.y())
+
+    def _place_adjacent_to_exclude(self, x_min, x_max, y_min, y_max,
+                                   text_w, text_h, padding):
+        """随机采样失败时，确定性地放在禁区旁边最大侧"""
+        r = self.exclude_region
+        rw = int(text_w + 2 * padding)
+        rh = int(text_h + 2 * padding)
+        # 四边可用空间
+        candidates = []
+        if r.x() - x_min >= rw:
+            candidates.append(('left', r.x() - x_min))
+        if x_max - (r.x() + r.width()) >= rw:
+            candidates.append(('right', x_max - (r.x() + r.width())))
+        if r.y() - y_min >= rh:
+            candidates.append(('top', r.y() - y_min))
+        if y_max - (r.y() + r.height()) >= rh:
+            candidates.append(('bottom', y_max - (r.y() + r.height())))
+        if not candidates:
+            self.x, self.y = x_min, y_min + text_h
+            return
+        side, _ = max(candidates, key=lambda s: s[1])
+        # 主轴紧贴禁区边缘，交叉轴对齐禁区顶/左
+        if side == 'left':
+            self.x = r.x() - rw
+            self.y = r.y()
+        elif side == 'right':
+            self.x = r.x() + r.width()
+            self.y = r.y()
+        elif side == 'top':
+            self.y = r.y() - rh + text_h
+            self.x = r.x()
+        else:
+            self.y = r.y() + r.height() + rh + text_h
+            self.x = r.x()
+        # 验证并修正
+        if self._overlaps_exclude_region(text_w, text_h, padding):
+            if side in ('left', 'right'):
+                self.y = r.y() + r.height() + rh + text_h
+            else:
+                self.x = r.x() + r.width() + rw
 
     # ---- 跟读预点亮：暗态槽位的左右分区放置与碰撞规避 ----
 
