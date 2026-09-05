@@ -81,7 +81,7 @@ class TimelinePage:
         pos_group.addSettingCard(ymax_card)
 
         # ---- 歌词禁止区域 ----
-        self.exclude_region_btn = PushButton(FluentIcon.CROP, "选择禁止区域")
+        self.exclude_region_btn = PushButton(FluentIcon.CLIPPING_TOOL, "选择禁止区域")
         self.exclude_region_btn.setMinimumWidth(120)
         self.exclude_region_status = "未设置"
         self.exclude_region_label = CaptionLabel(self.exclude_region_status)
