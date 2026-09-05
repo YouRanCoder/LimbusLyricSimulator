@@ -431,11 +431,18 @@ class LyricWindow(QMainWindow):
         top_margin = int(base)
         bottom_margin = int(total_height + base)
 
-        # 与用户设置的起始位置范围取交集，确保文本不溢出
-        x_min = max(c['user_x_min'], left_margin + c['persp_extra_x'])
-        x_max = min(c['user_x_max'], sw - right_margin - c['persp_extra_x'])
-        y_min = max(c['user_y_min'], top_margin + c['persp_extra_y'])
-        y_max = min(c['user_y_max'], sh - bottom_margin - c['persp_extra_y'])
+        # 有禁止区域时忽略百分比范围，用全屏作为可选区域；
+        # 无禁止区域时用百分比范围约束
+        if self.exclude_region is not None:
+            x_min = left_margin + c['persp_extra_x']
+            x_max = sw - right_margin - c['persp_extra_x']
+            y_min = top_margin + c['persp_extra_y']
+            y_max = sh - bottom_margin - c['persp_extra_y']
+        else:
+            x_min = max(c['user_x_min'], left_margin + c['persp_extra_x'])
+            x_max = min(c['user_x_max'], sw - right_margin - c['persp_extra_x'])
+            y_min = max(c['user_y_min'], top_margin + c['persp_extra_y'])
+            y_max = min(c['user_y_max'], sh - bottom_margin - c['persp_extra_y'])
 
         # 范围无效时，回退到安全范围内
         if x_max <= x_min:
