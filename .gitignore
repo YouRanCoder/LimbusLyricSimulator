@@ -16,3 +16,4 @@ log/
 test
 *.log
 lyric_config.json
+.commandcode

@@ -56,6 +56,8 @@ class LyricSettings:
     opacity: int = 100
     # 歌词禁止区域（像素坐标，None=无禁止区域）
     exclude_region: Optional[QRect] = None
+    # 禁区折叠开关
+    fold_enabled: bool = True
 
 
 class AppController(QObject):
@@ -416,6 +418,7 @@ class AppController(QObject):
         self._lyric_window.opacity = lyric_settings.opacity
         # 应用歌词禁止区域
         self._lyric_window.exclude_region = lyric_settings.exclude_region
+        self._lyric_window.fold_enabled = lyric_settings.fold_enabled
         self._lyric_window.start_lyric(
             lyric_settings.text,
             lyric_settings.font,
@@ -604,6 +607,12 @@ class AppController(QObject):
                                   {'x': region.x(), 'y': region.y(),
                                    'w': region.width(), 'h': region.height()}
                                   if region else None)
+
+    def set_fold_enabled(self, enabled: bool) -> None:
+        """设置禁区折叠开关"""
+        self.settings.set_setting('fold_enabled', enabled)
+        if self._lyric_window:
+            self._lyric_window.fold_enabled = enabled
 
     def filter_credit_lines(self, text: str) -> str:
         """过滤掉歌词中的编曲作词等标注行"""
