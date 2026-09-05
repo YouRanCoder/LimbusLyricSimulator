@@ -497,26 +497,28 @@ class LyricWindow(QMainWindow):
         if not candidates:
             self.x, self.y = x_min, y_min + text_h
             return
-        side, _ = max(candidates, key=lambda s: s[1])
-        # 主轴紧贴禁区边缘，交叉轴对齐禁区顶/左
+        side, _ = random.choice(candidates)
+        # 主轴紧贴禁区边缘，交叉轴随机
         if side == 'left':
             self.x = r.x() - rw
-            self.y = r.y()
+            self.y = random.randint(y_min + text_h, y_max + text_h)
         elif side == 'right':
             self.x = r.x() + r.width()
-            self.y = r.y()
+            self.y = random.randint(y_min + text_h, y_max + text_h)
         elif side == 'top':
             self.y = r.y() - rh + text_h
-            self.x = r.x()
+            self.x = random.randint(x_min, x_max)
         else:
             self.y = r.y() + r.height() + rh + text_h
-            self.x = r.x()
-        # 验证并修正
-        if self._overlaps_exclude_region(text_w, text_h, padding):
+            self.x = random.randint(x_min, x_max)
+        # 交叉轴随机可能仍重叠，重试几次
+        for _ in range(5):
+            if not self._overlaps_exclude_region(text_w, text_h, padding):
+                return
             if side in ('left', 'right'):
-                self.y = r.y() + r.height() + rh + text_h
+                self.y = random.randint(y_min + text_h, y_max + text_h)
             else:
-                self.x = r.x() + r.width() + rw
+                self.x = random.randint(x_min, x_max)
 
     # ---- 跟读预点亮：暗态槽位的左右分区放置与碰撞规避 ----
 
