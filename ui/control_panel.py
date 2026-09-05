@@ -12,8 +12,8 @@
 
 import logging
 
-from PyQt5.QtCore import QTimer
-from PyQt5.QtGui import QColor, QFont, QFontDatabase, QRect
+from PyQt5.QtCore import QRect, QTimer
+from PyQt5.QtGui import QColor, QFont, QFontDatabase
 from PyQt5.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon
 
 from qfluentwidgets import (
@@ -342,7 +342,7 @@ class ControlPanel(FluentWindow):
         )
 
         # 歌词禁止区域：点击按钮打开框选覆盖层
-        t.exclude_region_btn.clicked.connect(self._on_select_exclude_region)
+        t.exclude_region_btn.clicked.connect(self._on_exclude_region_btn)
 
         # 同步所有滑块标签（加载配置后标签可能未更新）
         self._sync_slider_labels()
@@ -669,11 +669,16 @@ class ControlPanel(FluentWindow):
         """恢复播放：从暂停位置继续"""
         self.controller.resume_playback()
 
-    def _on_select_exclude_region(self) -> None:
-        """打开全屏覆盖层让用户框选歌词禁止区域"""
-        self._overlay = RegionSelectOverlay()
-        self._overlay.region_selected.connect(self._on_exclude_region_selected)
-        self._overlay.showFullScreen()
+    def _on_exclude_region_btn(self) -> None:
+        """禁止区域按钮：无区域时打开框选，已有区域时清除"""
+        if self._exclude_region:
+            self._exclude_region = None
+            self.controller.set_exclude_region(None)
+            self._update_exclude_region_label()
+        else:
+            self._overlay = RegionSelectOverlay()
+            self._overlay.region_selected.connect(self._on_exclude_region_selected)
+            self._overlay.showFullScreen()
 
     def _on_exclude_region_selected(self, rect) -> None:
         """用户框选完成，保存禁止区域"""
@@ -689,20 +694,9 @@ class ControlPanel(FluentWindow):
         if r:
             t.exclude_region_label.setText(f"已设置（{r['w']}x{r['h']}）")
             t.exclude_region_btn.setText("清除禁止区域")
-            t.exclude_region_btn.clicked.disconnect(self._on_select_exclude_region)
-            t.exclude_region_btn.clicked.connect(self._on_clear_exclude_region)
         else:
             t.exclude_region_label.setText("未设置")
             t.exclude_region_btn.setText("选择禁止区域")
-
-    def _on_clear_exclude_region(self) -> None:
-        """清除歌词禁止区域"""
-        self._exclude_region = None
-        self.controller.set_exclude_region(None)
-        self._update_exclude_region_label()
-        t = self._timeline
-        t.exclude_region_btn.clicked.disconnect(self._on_clear_exclude_region)
-        t.exclude_region_btn.clicked.connect(self._on_select_exclude_region)
 
     @qasync.asyncSlot()
     async def _on_song_updated(self) -> None:

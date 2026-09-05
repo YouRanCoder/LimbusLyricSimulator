@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QMainWindow, QApplication
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QPainterPath, QTransform, QRect
+from PyQt5.QtCore import Qt, QTimer, QRect
+from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QPainterPath, QTransform
 import random, time, math
 import ctypes
 import logging

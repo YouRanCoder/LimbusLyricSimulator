@@ -11,8 +11,8 @@
 from dataclasses import dataclass
 import re
 from typing import Optional, Callable, Dict, Any
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
-from PyQt5.QtGui import QColor, QFont, QRect
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QRect
+from PyQt5.QtGui import QColor, QFont
 import qasync
 from core.player_manager import PlayerManager
 from core.lyric_service import LyricService, LyricResult
