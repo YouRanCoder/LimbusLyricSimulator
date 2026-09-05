@@ -16,3 +16,6 @@ log/
 test
 *.log
 lyric_config.json
+#用得太多了QAQ
+.commandcode
+.mimocode

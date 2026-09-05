@@ -1,9 +1,11 @@
 """时间页：演出延迟、时间轴参数与起始位置范围"""
 
 from qfluentwidgets import (
+    CaptionLabel,
     ComboBox,
     DoubleSpinBox,
     FluentIcon,
+    PushButton,
     SettingCardGroup,
     SpinBox,
 )
@@ -77,6 +79,17 @@ class TimelinePage:
         pos_group.addSettingCard(xmax_card)
         pos_group.addSettingCard(ymin_card)
         pos_group.addSettingCard(ymax_card)
+
+        # ---- 歌词禁止区域 ----
+        self.exclude_region_btn = PushButton(FluentIcon.CLIPPING_TOOL, "选择禁止区域")
+        self.exclude_region_btn.setMinimumWidth(120)
+        self.exclude_region_status = "未设置"
+        self.exclude_region_label = CaptionLabel(self.exclude_region_status)
+        exclude_card = widget_card(
+            FluentIcon.CANCEL, "歌词禁止区域", self.exclude_region_btn,
+            content="框选一块屏幕区域，歌词不会出现在该区域内；点击已设置的按钮可清除")
+        exclude_card.hBoxLayout.addWidget(self.exclude_region_label)
+        pos_group.addSettingCard(exclude_card)
 
         self.vbox.addWidget(timeline_group)
         self.vbox.addWidget(pos_group)

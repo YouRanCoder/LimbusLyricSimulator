@@ -11,7 +11,7 @@
 from dataclasses import dataclass
 import re
 from typing import Optional, Callable, Dict, Any
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QRect
 from PyQt5.QtGui import QColor, QFont
 import qasync
 from core.player_manager import PlayerManager
@@ -54,6 +54,8 @@ class LyricSettings:
     pos_y_max: int = 75
     # 歌词透明度（百分比，0=全透明，100=全不透明）
     opacity: int = 100
+    # 歌词禁止区域（像素坐标，None=无禁止区域）
+    exclude_region: Optional[QRect] = None
 
 
 class AppController(QObject):
@@ -412,6 +414,8 @@ class AppController(QObject):
         self._lyric_window.pos_y_max = lyric_settings.pos_y_max
         # 应用歌词透明度
         self._lyric_window.opacity = lyric_settings.opacity
+        # 应用歌词禁止区域
+        self._lyric_window.exclude_region = lyric_settings.exclude_region
         self._lyric_window.start_lyric(
             lyric_settings.text,
             lyric_settings.font,
@@ -591,6 +595,15 @@ class AppController(QObject):
         """设置歌词整体透明度（百分比，0=全透明，100=全不透明）"""
         if self._lyric_window:
             self._lyric_window.opacity = value
+
+    def set_exclude_region(self, region: Optional[QRect]) -> None:
+        """设置歌词禁止区域（像素坐标，None 表示清除）"""
+        if self._lyric_window:
+            self._lyric_window.exclude_region = region
+        self.settings.set_setting('exclude_region',
+                                  {'x': region.x(), 'y': region.y(),
+                                   'w': region.width(), 'h': region.height()}
+                                  if region else None)
 
     def filter_credit_lines(self, text: str) -> str:
         """过滤掉歌词中的编曲作词等标注行"""

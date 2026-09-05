@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QMainWindow, QApplication
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QRect
 from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QPainterPath, QTransform
 import random, time, math
 import ctypes
@@ -93,6 +93,8 @@ class LyricWindow(QMainWindow):
         self.pos_y_max = 75
         # 歌词整体透明度（百分比，0=全透明，100=全不透明）
         self.opacity = 100
+        # 歌词禁止区域（QRect 像素坐标，None=无禁止区域）
+        self.exclude_region = None
         # 防捕获（独立 Overlay）状态：True 时录屏/直播软件捕获不到歌词层
         self._capture_excluded = False
         # 置顶保活：Lossless Scaling 等全屏输出窗口会抢占 z 序把歌词压下去，
@@ -407,6 +409,70 @@ class LyricWindow(QMainWindow):
             cap = int(cap / (1.0 + self.persp_compensation))
         return max(min(int(avail), cap), 120)
 
+    def _rotated_size(self, rows, angle, c):
+        """文本块旋转后的包围盒尺寸 (rot_w, rot_h)，已含发光/阴影余量
+
+        与 _rotated_aabb 共用同一几何：旋转按刚性旋转近似，
+        rot_w/rot_h 是 AABB 的完整宽高（pad 已计入两侧）。
+        """
+        fm = QFontMetrics(self.font)
+        th = fm.height()
+        width = max((self._text_width(r) for r in rows), default=0)
+        height = len(rows) * (th + c['line_spacing'])
+        ar = math.radians(angle)
+        rot_w = width * abs(math.cos(ar)) + height * abs(math.sin(ar))
+        rot_h = width * abs(math.sin(ar)) + height * abs(math.cos(ar))
+        pad = c['glow_margin'] + c['shadow_margin']
+        return rot_w + 2 * pad, rot_h + 2 * pad
+
+    def _region_exclusion_rects(self, x_min, x_max, y_min, y_max, rows, angle, c):
+        """把落点候选矩形切成若干安全子矩形；无禁区则返回整个矩形
+
+        约束是「整块文本（AABB）不碰禁区」，做精确四侧外推：
+        文本 AABB = (x-pad, y-th-pad, rot_w, rot_h)，锚点 y 是首行基线。
+        整块避开 = AABB 完整落在禁区的某一侧（上/下/左/右）。对每一侧
+        解出满足条件的锚点 (x, y) 安全带，返回所有非空带，按面积降序。
+        """
+        if self.exclude_region is None:
+            return [(x_min, y_min, x_max, y_max)]
+        rot_w, rot_h = self._rotated_size(rows, angle, c)
+        pad = c['glow_margin'] + c['shadow_margin']
+        th = c['text_height']
+        r = self.exclude_region
+        rx, ry = r.x(), r.y()
+        rx1, ry1 = rx + r.width(), ry + r.height()
+
+        bands = []
+        # 在禁区上方：AABB 底边 <= 禁区顶边（y 越大越危险，取上界向下取整）
+        y_band = int(ry - 1 - (rot_h - th - pad))   # y - th - pad + rot_h <= ry - 1
+        if y_min < y_band:
+            bands.append((x_min, y_min, x_max, min(y_max, y_band)))
+        # 在禁区下方：AABB 顶边 >= 禁区底边（y 越小越危险，取下界向上取整）
+        y_band = int(math.ceil(ry1 + 1 + th + pad))  # y - th - pad >= ry1 + 1
+        if y_band < y_max:
+            bands.append((x_min, max(y_min, y_band), x_max, y_max))
+        # 在禁区左侧：AABB 右边 <= 禁区左边（x 越大越危险）
+        x_band = int(rx - 1 - (rot_w - pad))         # x - pad + rot_w <= rx - 1
+        if x_min < x_band:
+            bands.append((x_min, y_min, min(x_max, x_band), y_max))
+        # 在禁区右侧：AABB 左边 >= 禁区右边（x 越小越危险）
+        x_band = int(math.ceil(rx1 + 1 + pad))       # x - pad >= rx1 + 1
+        if x_band < x_max:
+            bands.append((max(x_min, x_band), y_min, x_max, y_max))
+
+        # 过滤无效带，按面积降序返回
+        valid = [(a, b, cc, d) for a, b, cc, d in bands
+                 if cc > a and d > b]
+        valid.sort(key=lambda q: (q[2] - q[0]) * (q[3] - q[1]), reverse=True)
+        return valid
+
+    def _collides_with_preview_slots(self, rect):
+        """包围盒是否与任何存活暗态槽位重叠（不含当前句自身）"""
+        for s in self.preview_slots:
+            if self._rects_overlap(rect, self._rotated_aabb(s['x'], s['y'], s['rows'], s['angle'])):
+                return True
+        return False
+
     def place_randomly(self):
         c = self._compute_place_constraints()
         sw = c['sw']
@@ -429,11 +495,17 @@ class LyricWindow(QMainWindow):
         top_margin = int(base)
         bottom_margin = int(total_height + base)
 
-        # 与用户设置的起始位置范围取交集，确保文本不溢出
-        x_min = max(c['user_x_min'], left_margin + c['persp_extra_x'])
-        x_max = min(c['user_x_max'], sw - right_margin - c['persp_extra_x'])
-        y_min = max(c['user_y_min'], top_margin + c['persp_extra_y'])
-        y_max = min(c['user_y_max'], sh - bottom_margin - c['persp_extra_y'])
+        # 用百分比范围约束；禁区开启时忽略位置范围，改用全屏可用区
+        if self.exclude_region is not None:
+            x_min = left_margin + c['persp_extra_x']
+            x_max = sw - right_margin - c['persp_extra_x']
+            y_min = top_margin + c['persp_extra_y']
+            y_max = sh - bottom_margin - c['persp_extra_y']
+        else:
+            x_min = max(c['user_x_min'], left_margin + c['persp_extra_x'])
+            x_max = min(c['user_x_max'], sw - right_margin - c['persp_extra_x'])
+            y_min = max(c['user_y_min'], top_margin + c['persp_extra_y'])
+            y_max = min(c['user_y_max'], sh - bottom_margin - c['persp_extra_y'])
 
         # 范围无效时，回退到安全范围内
         if x_max <= x_min:
@@ -444,10 +516,92 @@ class LyricWindow(QMainWindow):
             y_max = max(y_min + 1, sh - bottom_margin - c['persp_extra_y'])
 
         # self.x 是文本左边缘，self.y 是文本基线位置
-        self.x = random.randint(x_min, x_max)
-        self.y = random.randint(y_min, y_max)
-        self.angle = random.randint(self.angle_min, self.angle_max)
+        # 整块避开禁区：先定角度再算包围盒，锚点落在安全子矩形内；
+        # 随机角度放不下整块时降级试更小的角度（包围盒更窄），
+        # 尽可能保证整块不进禁区，全部失败才走兜底。
+        # 放置时同时检查与预览槽位的碰撞，避免当前句盖住跟读暗态句。
+        if self.exclude_region is not None:
+            candidates = [random.randint(self.angle_min, self.angle_max)]
+            candidates += [a for a in (0, 1, -1, 2, -2, 3, -3)
+                           if self.angle_min <= a <= self.angle_max and a not in candidates]
+            placed = False
+            fallback = None
+            for ang in candidates:
+                safe = self._region_exclusion_rects(
+                    x_min, x_max, y_min, y_max, self.wrapped_lines, ang, c)
+                if not safe:
+                    continue
+                for band in safe:
+                    rx0, ry0, rx1, ry1 = band
+                    if rx1 <= rx0 or ry1 <= ry0:
+                        continue
+                    if rx1 == rx0 and ry1 == ry0:
+                        # 单点带：直接落该点
+                        if fallback is None:
+                            fallback = (rx0, ry0, ang)
+                        aabb = self._rotated_aabb(rx0, ry0, self.wrapped_lines, ang)
+                        if not self._collides_with_preview_slots(aabb):
+                            self.angle = ang; self.x = rx0; self.y = ry0
+                            placed = True; break
+                        continue
+                    for _ in range(12):
+                        x = random.randint(rx0, rx1)
+                        y = random.randint(ry0, ry1)
+                        if fallback is None:
+                            fallback = (x, y, ang)
+                        aabb = self._rotated_aabb(x, y, self.wrapped_lines, ang)
+                        if not self._collides_with_preview_slots(aabb):
+                            self.angle = ang; self.x = x; self.y = y
+                            placed = True; break
+                    if placed:
+                        break
+                if placed:
+                    break
+            if not placed:
+                if fallback is not None:
+                    self.angle = fallback[2]; self.x = fallback[0]; self.y = fallback[1]
+                else:
+                    self._fallback_place(x_min, x_max, y_min, y_max)
+        else:
+            self.angle = random.randint(self.angle_min, self.angle_max)
+            placed = False
+            for _ in range(40):
+                x = random.randint(x_min, x_max)
+                y = random.randint(y_min, y_max)
+                aabb = self._rotated_aabb(x, y, self.wrapped_lines, self.angle)
+                if not self._collides_with_preview_slots(aabb):
+                    self.x = x; self.y = y
+                    placed = True; break
+            if not placed:
+                self.x = random.randint(x_min, x_max)
+                self.y = random.randint(y_min, y_max)
         self.compute_perspective()
+
+    def _fallback_place(self, x_min, x_max, y_min, y_max):
+        """禁区几乎占满可放区时的兜底：按中点向禁区外围找最近可放点"""
+        r = self.exclude_region
+        self.angle = random.randint(self.angle_min, self.angle_max)
+        self.x = (x_min + x_max) // 2
+        self.y = (y_min + y_max) // 2
+        # 若起点仍落在禁区内，沿最近方向推出禁区
+        if r and r.contains(self.x, self.y):
+            dist_left = self.x - r.x()
+            dist_right = r.x() + r.width() - self.x
+            dist_top = self.y - r.y()
+            dist_bottom = r.y() + r.height() - self.y
+            edge = min(dist_left, dist_right, dist_top, dist_bottom,
+                       key=lambda d: d)
+            if edge == dist_left:
+                self.x = r.x()
+            elif edge == dist_right:
+                self.x = r.x() + r.width()
+            elif edge == dist_top:
+                self.y = r.y()
+            else:
+                self.y = r.y() + r.height()
+            # 推出后若落在候选范围外，夹回范围（尽量靠近禁区边缘）
+            self.x = max(x_min, min(x_max, self.x))
+            self.y = max(y_min, min(y_max, self.y))
 
     # ---- 跟读预点亮：暗态槽位的左右分区放置与碰撞规避 ----
 
@@ -459,13 +613,9 @@ class LyricWindow(QMainWindow):
         c = self._compute_place_constraints()
         fm = QFontMetrics(self.font)
         th = fm.height()
-        width = max((self._text_width(r) for r in rows), default=0)
-        height = len(rows) * (th + c['line_spacing'])
-        ar = math.radians(angle)
-        rot_w = width * abs(math.cos(ar)) + height * abs(math.sin(ar))
-        rot_h = width * abs(math.sin(ar)) + height * abs(math.cos(ar))
+        rot_w, rot_h = self._rotated_size(rows, angle, c)
         pad = c['glow_margin'] + c['shadow_margin']
-        return (x - pad, y - th - pad, rot_w + 2 * pad, rot_h + 2 * pad)
+        return (x - pad, y - th - pad, rot_w, rot_h)
 
     def _slot_collides(self, rect):
         """包围盒是否与当前句或任何存活暗态槽位重叠"""
@@ -484,11 +634,13 @@ class LyricWindow(QMainWindow):
         return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
 
     def _spawn_preview_slot(self, idx):
-        """为第 idx 句创建暗态槽位：全屏随机放置 + 碰撞规避
+        """为第 idx 句创建暗态槽位：随机放置 + 碰撞规避 + 禁区整块避让
 
-        长句（折行后仍很宽）在常规范围放不下时，逐步放宽到屏幕居中兜底，
+        长句（折行后仍很宽）在常规范围放不下时，放宽到可用区居中兜底，
         保证任何句子都能生成槽位；碰撞多次失败才允许少量重叠（视觉上
-        优于整句消失）。
+        优于整句消失）。有禁区时：采样范围用 _region_exclusion_rects
+        切出的安全带（锚点整块 AABB 不进禁区），随机角度放不下时降级
+        试更小角度；仍无解才退回全范围（可能侵入禁区，属极端退化）。
         """
         rows = self.wrap_text(self.lyric_timeline[idx][1], self._get_max_text_width())
         if not rows:
@@ -496,36 +648,73 @@ class LyricWindow(QMainWindow):
         c = self._compute_place_constraints()
         fm = QFontMetrics(self.font)
         th = fm.height()
-        width = max(self._text_width(r) for r in rows)
-        height = len(rows) * (th + c['line_spacing'])
-        angle = random.randint(self.angle_min, self.angle_max)
-        ar = math.radians(angle)
-        rot_w = width * abs(math.cos(ar)) + height * abs(math.sin(ar))
-        rot_h = width * abs(math.sin(ar)) + height * abs(math.cos(ar))
-
         sw, sh = c['sw'], c['sh']
         base = int(c['base_margin'])
-        x_min = max(c['user_x_min'], base + c['persp_extra_x'])
-        x_max = min(c['user_x_max'], sw - int(rot_w) - base - c['persp_extra_x'])
-        y_min = max(c['user_y_min'], int(th) + c['persp_extra_y'])
-        y_max = min(c['user_y_max'], sh - int(rot_h) - int(th) - c['persp_extra_y'])
-        # 常规范围放不下（长句/小屏）：放宽到可用区居中，保证句子不消失
-        if x_max <= x_min:
-            x_min = x_max = max(base + c['persp_extra_x'], int((sw - rot_w) / 2))
-        if y_max <= y_min:
-            y_min = y_max = max(c['user_y_min'], int((sh - rot_h - th) / 2))
+        region_active = self.exclude_region is not None
 
+        def _base_range(angle):
+            rot_w, rot_h = self._rotated_size(rows, angle, c)
+            # 禁区开启时忽略位置范围，改用全屏可用区
+            if region_active:
+                x_min = base + c['persp_extra_x']
+                x_max = sw - int(rot_w) - base - c['persp_extra_x']
+                y_min = int(th) + c['persp_extra_y']
+                y_max = sh - int(rot_h) - int(th) - c['persp_extra_y']
+            else:
+                x_min = max(c['user_x_min'], base + c['persp_extra_x'])
+                x_max = min(c['user_x_max'], sw - int(rot_w) - base - c['persp_extra_x'])
+                y_min = max(c['user_y_min'], int(th) + c['persp_extra_y'])
+                y_max = min(c['user_y_max'], sh - int(rot_h) - int(th) - c['persp_extra_y'])
+            # 常规范围放不下（长句/小屏）：放宽到可用区居中，保证句子不消失
+            if x_max <= x_min:
+                x_min = x_max = max(base + c['persp_extra_x'], int((sw - rot_w) / 2))
+            if y_max <= y_min:
+                y_min = y_max = max(int(th), int((sh - rot_h - th) / 2))
+            return x_min, x_max, y_min, y_max
+
+        angles = [random.randint(self.angle_min, self.angle_max)]
+        angles += [a for a in (0, 1, -1, 2, -2, 3, -3)
+                   if self.angle_min <= a <= self.angle_max and a not in angles]
+
+        # ---- 主阶段：优先放安全带内且不与其他块重叠的点 ----
+        # fallback 记录每个角度/带第一个候选，全部失败时用它兜底
+        # （允许少量重叠，保证句子不消失）
         fallback = None
-        for _ in range(40):
-            x = random.randint(x_min, x_max)
-            y = random.randint(y_min, y_max)
-            if fallback is None:
-                fallback = (x, y)
-            if not self._slot_collides(self._rotated_aabb(x, y, rows, angle)):
-                self._add_preview_slot(idx, rows, x, y, angle)
-                return
-        # 全部尝试失败（屏幕拥挤）：用首个候选兜底
-        self._add_preview_slot(idx, rows, fallback[0], fallback[1], angle)
+        for angle in angles:
+            x_min, x_max, y_min, y_max = _base_range(angle)
+            bands = None
+            if region_active:
+                bands = self._region_exclusion_rects(
+                    x_min, x_max, y_min, y_max, rows, angle, c)
+                if not bands:
+                    continue  # 该角度无安全带，降级试下一角度
+            for band in bands or [(x_min, y_min, x_max, y_max)]:
+                bx0, by0, bx1, by1 = band
+                if bx1 < bx0 or by1 < by0:
+                    continue  # 空带（坐标取整产生）
+                if bx1 == bx0 and by1 == by0:
+                    # 单点带（居中放宽兜底）：直接落该点（仍查一次重叠）
+                    if fallback is None:
+                        fallback = (bx0, by0, angle)
+                    if not self._slot_collides(self._rotated_aabb(bx0, by0, rows, angle)):
+                        self._add_preview_slot(idx, rows, bx0, by0, angle)
+                        return
+                    continue
+                # 宽带：随机尝试（有禁区时带较窄试 12 次即可，无禁区对齐原 40 次）
+                tries = 12 if region_active else 40
+                for _ in range(tries):
+                    x = random.randint(bx0, bx1)
+                    y = random.randint(by0, by1)
+                    if fallback is None:
+                        fallback = (x, y, angle)
+                    aabb = self._rotated_aabb(x, y, rows, angle)
+                    if not self._slot_collides(aabb):
+                        self._add_preview_slot(idx, rows, x, y, angle)
+                        return
+        if fallback is not None:
+            # 全部尝试失败（屏幕拥挤）：用首个候选兜底（少量重叠）
+            self._add_preview_slot(idx, rows, fallback[0], fallback[1], fallback[2])
+            return
 
     def _add_preview_slot(self, idx, rows, x, y, angle):
         self.preview_slots.append({
