@@ -13,7 +13,7 @@
 import logging
 
 from PyQt5.QtCore import QTimer
-from PyQt5.QtGui import QColor, QFont, QFontDatabase
+from PyQt5.QtGui import QColor, QFont, QFontDatabase, QRect
 from PyQt5.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon
 
 from qfluentwidgets import (
@@ -28,6 +28,7 @@ from core.autostart import is_autostart_enabled, set_autostart
 from core.fetcher import is_pure_music
 from ui.dialogs import PlayerConfigDialog, ask_text, confirm, warn
 from ui.pages import AnimationPage, AppearancePage, PlaybackPage, TimelinePage
+from ui.region_overlay import RegionSelectOverlay
 
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,8 @@ class ControlPanel(FluentWindow):
 
         # 纯音乐/伴奏规则（来自 lyric_config.json，None 表示用内置默认）
         self.inst_patterns = None
+        # 歌词禁止区域（像素坐标字典，None=未设置）
+        self._exclude_region = None
 
         # 应用品牌主题色（金色）
         setThemeColor(QColor("#d8a523"))
@@ -158,6 +161,8 @@ class ControlPanel(FluentWindow):
             t.pos_y_min_s.setValue(settings.get_setting('pos_y_min', 5))
             t.pos_y_max_s.setValue(settings.get_setting('pos_y_max', 75))
             a.opacity_slider.setValue(settings.get_setting('opacity', 100))
+            self._exclude_region = settings.get_setting('exclude_region', None)
+            self._update_exclude_region_label()
             source_name = settings.get_setting('source', '网易云')
             idx = p.source_combo.findText(source_name)
             if idx >= 0:
@@ -205,6 +210,7 @@ class ControlPanel(FluentWindow):
             'pos_y_min': t.pos_y_min_s.value(),
             'pos_y_max': t.pos_y_max_s.value(),
             'opacity': a.opacity_slider.value(),
+            'exclude_region': self._exclude_region,
             'player': p.player_combo.currentText(),
             'source': p.source_combo.currentText(),
             'perspective_enabled': n.perspective_check.isChecked(),
@@ -334,6 +340,9 @@ class ControlPanel(FluentWindow):
             lambda v: (self.controller.set_opacity(v),
                        a.opacity_label.setText(f"{v}%"))
         )
+
+        # 歌词禁止区域：点击按钮打开框选覆盖层
+        t.exclude_region_btn.clicked.connect(self._on_select_exclude_region)
 
         # 同步所有滑块标签（加载配置后标签可能未更新）
         self._sync_slider_labels()
@@ -641,6 +650,9 @@ class ControlPanel(FluentWindow):
             pos_y_min=t.pos_y_min_s.value(),
             pos_y_max=t.pos_y_max_s.value(),
             opacity=a.opacity_slider.value(),
+            exclude_region=QRect(self._exclude_region['x'], self._exclude_region['y'],
+                                 self._exclude_region['w'], self._exclude_region['h'])
+                           if self._exclude_region else None,
         )
         self.controller.start_playback(lyric_settings)
 
@@ -656,6 +668,41 @@ class ControlPanel(FluentWindow):
     def _on_resume(self) -> None:
         """恢复播放：从暂停位置继续"""
         self.controller.resume_playback()
+
+    def _on_select_exclude_region(self) -> None:
+        """打开全屏覆盖层让用户框选歌词禁止区域"""
+        self._overlay = RegionSelectOverlay()
+        self._overlay.region_selected.connect(self._on_exclude_region_selected)
+        self._overlay.showFullScreen()
+
+    def _on_exclude_region_selected(self, rect) -> None:
+        """用户框选完成，保存禁止区域"""
+        self._exclude_region = {'x': rect.x(), 'y': rect.y(),
+                                'w': rect.width(), 'h': rect.height()}
+        self.controller.set_exclude_region(rect)
+        self._update_exclude_region_label()
+
+    def _update_exclude_region_label(self) -> None:
+        """更新禁止区域状态标签"""
+        t = self._timeline
+        r = self._exclude_region
+        if r:
+            t.exclude_region_label.setText(f"已设置（{r['w']}x{r['h']}）")
+            t.exclude_region_btn.setText("清除禁止区域")
+            t.exclude_region_btn.clicked.disconnect(self._on_select_exclude_region)
+            t.exclude_region_btn.clicked.connect(self._on_clear_exclude_region)
+        else:
+            t.exclude_region_label.setText("未设置")
+            t.exclude_region_btn.setText("选择禁止区域")
+
+    def _on_clear_exclude_region(self) -> None:
+        """清除歌词禁止区域"""
+        self._exclude_region = None
+        self.controller.set_exclude_region(None)
+        self._update_exclude_region_label()
+        t = self._timeline
+        t.exclude_region_btn.clicked.disconnect(self._on_clear_exclude_region)
+        t.exclude_region_btn.clicked.connect(self._on_select_exclude_region)
 
     @qasync.asyncSlot()
     async def _on_song_updated(self) -> None:

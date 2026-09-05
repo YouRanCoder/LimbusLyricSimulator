@@ -208,6 +208,7 @@ class SettingsManager:
             'pos_y_min': 5,
             'pos_y_max': 75,
             'opacity': 100,
+            'exclude_region': None,
             'player': '网易云音乐',
             'source': '网易云',
             # 防捕获（独立 Overlay）：开启后录屏/直播软件捕获不到歌词层

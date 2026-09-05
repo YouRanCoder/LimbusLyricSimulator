@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QMainWindow, QApplication
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QPainterPath, QTransform
+from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QPainterPath, QTransform, QRect
 import random, time, math
 import ctypes
 import logging
@@ -93,6 +93,8 @@ class LyricWindow(QMainWindow):
         self.pos_y_max = 75
         # 歌词整体透明度（百分比，0=全透明，100=全不透明）
         self.opacity = 100
+        # 歌词禁止区域（QRect 像素坐标，None=无禁止区域）
+        self.exclude_region = None
         # 防捕获（独立 Overlay）状态：True 时录屏/直播软件捕获不到歌词层
         self._capture_excluded = False
         # 置顶保活：Lossless Scaling 等全屏输出窗口会抢占 z 序把歌词压下去，
@@ -444,10 +446,24 @@ class LyricWindow(QMainWindow):
             y_max = max(y_min + 1, sh - bottom_margin - c['persp_extra_y'])
 
         # self.x 是文本左边缘，self.y 是文本基线位置
-        self.x = random.randint(x_min, x_max)
-        self.y = random.randint(y_min, y_max)
         self.angle = random.randint(self.angle_min, self.angle_max)
+        for _ in range(20):
+            self.x = random.randint(x_min, x_max)
+            self.y = random.randint(y_min, y_max)
+            if not self._overlaps_exclude_region(rotated_w, total_height, base):
+                break
         self.compute_perspective()
+
+    def _overlaps_exclude_region(self, text_w, text_h, padding):
+        """当前 (x, y) 位置的文本包围盒是否与禁止区域重叠"""
+        r = self.exclude_region
+        if r is None:
+            return False
+        # 文本包围盒（含发光/阴影边距）
+        tx, ty = int(self.x - padding), int(self.y - text_h - padding)
+        tw, th = int(text_w + 2 * padding), int(text_h + 2 * padding)
+        return (tx < r.x() + r.width() and tx + tw > r.x() and
+                ty < r.y() + r.height() and ty + th > r.y())
 
     # ---- 跟读预点亮：暗态槽位的左右分区放置与碰撞规避 ----
 
