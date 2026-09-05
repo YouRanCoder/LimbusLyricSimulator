@@ -468,6 +468,13 @@ class LyricWindow(QMainWindow):
         valid.sort(key=lambda q: (q[2] - q[0]) * (q[3] - q[1]), reverse=True)
         return valid
 
+    def _collides_with_preview_slots(self, rect):
+        """包围盒是否与任何存活暗态槽位重叠（不含当前句自身）"""
+        for s in self.preview_slots:
+            if self._rects_overlap(rect, self._rotated_aabb(s['x'], s['y'], s['rows'], s['angle'])):
+                return True
+        return False
+
     def place_randomly(self):
         c = self._compute_place_constraints()
         sw = c['sw']
@@ -490,11 +497,17 @@ class LyricWindow(QMainWindow):
         top_margin = int(base)
         bottom_margin = int(total_height + base)
 
-        # 用百分比范围约束
-        x_min = max(c['user_x_min'], left_margin + c['persp_extra_x'])
-        x_max = min(c['user_x_max'], sw - right_margin - c['persp_extra_x'])
-        y_min = max(c['user_y_min'], top_margin + c['persp_extra_y'])
-        y_max = min(c['user_y_max'], sh - bottom_margin - c['persp_extra_y'])
+        # 用百分比范围约束；禁区开启时忽略位置范围，改用全屏可用区
+        if self.exclude_region is not None and self.fold_enabled:
+            x_min = left_margin + c['persp_extra_x']
+            x_max = sw - right_margin - c['persp_extra_x']
+            y_min = top_margin + c['persp_extra_y']
+            y_max = sh - bottom_margin - c['persp_extra_y']
+        else:
+            x_min = max(c['user_x_min'], left_margin + c['persp_extra_x'])
+            x_max = min(c['user_x_max'], sw - right_margin - c['persp_extra_x'])
+            y_min = max(c['user_y_min'], top_margin + c['persp_extra_y'])
+            y_max = min(c['user_y_max'], sh - bottom_margin - c['persp_extra_y'])
 
         # 范围无效时，回退到安全范围内
         if x_max <= x_min:
@@ -508,28 +521,62 @@ class LyricWindow(QMainWindow):
         # 整块避开禁区：先定角度再算包围盒，锚点落在安全子矩形内；
         # 随机角度放不下整块时降级试更小的角度（包围盒更窄），
         # 尽可能保证整块不进禁区，全部失败才走兜底。
+        # 放置时同时检查与预览槽位的碰撞，避免当前句盖住跟读暗态句。
         if self.exclude_region is not None and self.fold_enabled:
             candidates = [random.randint(self.angle_min, self.angle_max)]
             candidates += [a for a in (0, 1, -1, 2, -2, 3, -3)
                            if self.angle_min <= a <= self.angle_max and a not in candidates]
             placed = False
+            fallback = None
             for ang in candidates:
                 safe = self._region_exclusion_rects(
                     x_min, x_max, y_min, y_max, self.wrapped_lines, ang, c)
-                if safe:
-                    self.angle = ang
-                    rx0, ry0, rx1, ry1 = safe[0]  # 面积最大的一块
-                    self.x = random.randint(rx0, rx1)
-                    self.y = random.randint(ry0, ry1)
-                    placed = True
+                if not safe:
+                    continue
+                for band in safe:
+                    rx0, ry0, rx1, ry1 = band
+                    if rx1 <= rx0 or ry1 <= ry0:
+                        continue
+                    if rx1 == rx0 and ry1 == ry0:
+                        # 单点带：直接落该点
+                        if fallback is None:
+                            fallback = (rx0, ry0, ang)
+                        aabb = self._rotated_aabb(rx0, ry0, self.wrapped_lines, ang)
+                        if not self._collides_with_preview_slots(aabb):
+                            self.angle = ang; self.x = rx0; self.y = ry0
+                            placed = True; break
+                        continue
+                    for _ in range(12):
+                        x = random.randint(rx0, rx1)
+                        y = random.randint(ry0, ry1)
+                        if fallback is None:
+                            fallback = (x, y, ang)
+                        aabb = self._rotated_aabb(x, y, self.wrapped_lines, ang)
+                        if not self._collides_with_preview_slots(aabb):
+                            self.angle = ang; self.x = x; self.y = y
+                            placed = True; break
+                    if placed:
+                        break
+                if placed:
                     break
             if not placed:
-                # 禁区把可放区占满：仍保证至少有一个候选点不落在禁区内
-                self._fallback_place(x_min, x_max, y_min, y_max)
+                if fallback is not None:
+                    self.angle = fallback[2]; self.x = fallback[0]; self.y = fallback[1]
+                else:
+                    self._fallback_place(x_min, x_max, y_min, y_max)
         else:
             self.angle = random.randint(self.angle_min, self.angle_max)
-            self.x = random.randint(x_min, x_max)
-            self.y = random.randint(y_min, y_max)
+            placed = False
+            for _ in range(40):
+                x = random.randint(x_min, x_max)
+                y = random.randint(y_min, y_max)
+                aabb = self._rotated_aabb(x, y, self.wrapped_lines, self.angle)
+                if not self._collides_with_preview_slots(aabb):
+                    self.x = x; self.y = y
+                    placed = True; break
+            if not placed:
+                self.x = random.randint(x_min, x_max)
+                self.y = random.randint(y_min, y_max)
         self.compute_perspective()
 
     def _fallback_place(self, x_min, x_max, y_min, y_max):
@@ -609,15 +656,22 @@ class LyricWindow(QMainWindow):
 
         def _base_range(angle):
             rot_w, rot_h = self._rotated_size(rows, angle, c)
-            x_min = max(c['user_x_min'], base + c['persp_extra_x'])
-            x_max = min(c['user_x_max'], sw - int(rot_w) - base - c['persp_extra_x'])
-            y_min = max(c['user_y_min'], int(th) + c['persp_extra_y'])
-            y_max = min(c['user_y_max'], sh - int(rot_h) - int(th) - c['persp_extra_y'])
+            # 禁区开启时忽略位置范围，改用全屏可用区
+            if region_active:
+                x_min = base + c['persp_extra_x']
+                x_max = sw - int(rot_w) - base - c['persp_extra_x']
+                y_min = int(th) + c['persp_extra_y']
+                y_max = sh - int(rot_h) - int(th) - c['persp_extra_y']
+            else:
+                x_min = max(c['user_x_min'], base + c['persp_extra_x'])
+                x_max = min(c['user_x_max'], sw - int(rot_w) - base - c['persp_extra_x'])
+                y_min = max(c['user_y_min'], int(th) + c['persp_extra_y'])
+                y_max = min(c['user_y_max'], sh - int(rot_h) - int(th) - c['persp_extra_y'])
             # 常规范围放不下（长句/小屏）：放宽到可用区居中，保证句子不消失
             if x_max <= x_min:
                 x_min = x_max = max(base + c['persp_extra_x'], int((sw - rot_w) / 2))
             if y_max <= y_min:
-                y_min = y_max = max(c['user_y_min'], int((sh - rot_h - th) / 2))
+                y_min = y_max = max(int(th), int((sh - rot_h - th) / 2))
             return x_min, x_max, y_min, y_max
 
         angles = [random.randint(self.angle_min, self.angle_max)]
