@@ -56,7 +56,7 @@ class LyricSettings:
     opacity: int = 100
     # 歌词禁止区域（像素坐标，None=无禁止区域）
     exclude_region: Optional[QRect] = None
-    # 禁区折叠开关
+    # 避开禁区开关：开启时歌词整块避开禁止区域演出
     fold_enabled: bool = True
 
 
@@ -609,7 +609,7 @@ class AppController(QObject):
                                   if region else None)
 
     def set_fold_enabled(self, enabled: bool) -> None:
-        """设置禁区折叠开关"""
+        """设置避开禁区开关：开启时歌词整块避开禁止区域演出"""
         self.settings.set_setting('fold_enabled', enabled)
         if self._lyric_window:
             self._lyric_window.fold_enabled = enabled

@@ -91,10 +91,10 @@ class TimelinePage:
         exclude_card.hBoxLayout.addWidget(self.exclude_region_label)
         pos_group.addSettingCard(exclude_card)
 
-        # 禁区折叠：起点落入禁区时反射到最近边缘
+        # 避开禁区：开启时当前句与跟读预点亮整块避开禁区（不进禁区演出）
         fold_card, self.fold_check = switch_card(
-            FluentIcon.ROTATE, "禁区折叠",
-            content="开启时歌词起点落在禁区内会自动折叠到最近边缘，关闭则不处理",
+            FluentIcon.ROTATE, "避开禁区",
+            content="开启时歌词整块避开禁止区域，不进入禁区演出；关闭则无视禁区随机放置",
             checked=True)
         pos_group.addSettingCard(fold_card)
 

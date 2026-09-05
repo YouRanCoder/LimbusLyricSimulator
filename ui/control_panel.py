@@ -346,7 +346,7 @@ class ControlPanel(FluentWindow):
         # 歌词禁止区域：点击按钮打开框选覆盖层
         t.exclude_region_btn.clicked.connect(self._on_exclude_region_btn)
 
-        # 禁区折叠开关：切换时实时生效并持久化
+        # 避开禁区开关：切换时实时生效并持久化
         t.fold_check.checkedChanged.connect(self.controller.set_fold_enabled)
 
         # 同步所有滑块标签（加载配置后标签可能未更新）
