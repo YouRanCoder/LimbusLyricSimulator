@@ -163,7 +163,7 @@ class ControlPanel(FluentWindow):
             a.opacity_slider.setValue(settings.get_setting('opacity', 100))
             self._exclude_region = settings.get_setting('exclude_region', None)
             self._update_exclude_region_label()
-            t.fold_check.setChecked(settings.get_setting('fold_enabled', True))
+
             source_name = settings.get_setting('source', '网易云')
             idx = p.source_combo.findText(source_name)
             if idx >= 0:
@@ -212,7 +212,6 @@ class ControlPanel(FluentWindow):
             'pos_y_max': t.pos_y_max_s.value(),
             'opacity': a.opacity_slider.value(),
             'exclude_region': self._exclude_region,
-            'fold_enabled': t.fold_check.isChecked(),
             'player': p.player_combo.currentText(),
             'source': p.source_combo.currentText(),
             'perspective_enabled': n.perspective_check.isChecked(),
@@ -345,9 +344,6 @@ class ControlPanel(FluentWindow):
 
         # 歌词禁止区域：点击按钮打开框选覆盖层
         t.exclude_region_btn.clicked.connect(self._on_exclude_region_btn)
-
-        # 避开禁区开关：切换时实时生效并持久化
-        t.fold_check.checkedChanged.connect(self.controller.set_fold_enabled)
 
         # 同步所有滑块标签（加载配置后标签可能未更新）
         self._sync_slider_labels()
@@ -658,7 +654,6 @@ class ControlPanel(FluentWindow):
             exclude_region=QRect(self._exclude_region['x'], self._exclude_region['y'],
                                  self._exclude_region['w'], self._exclude_region['h'])
                            if self._exclude_region else None,
-            fold_enabled=t.fold_check.isChecked(),
         )
         self.controller.start_playback(lyric_settings)
 

@@ -95,8 +95,6 @@ class LyricWindow(QMainWindow):
         self.opacity = 100
         # 歌词禁止区域（QRect 像素坐标，None=无禁止区域）
         self.exclude_region = None
-        # 避开禁区开关：开启时当前句与跟读暗态槽位整块避开禁区演出
-        self.fold_enabled = True
         # 防捕获（独立 Overlay）状态：True 时录屏/直播软件捕获不到歌词层
         self._capture_excluded = False
         # 置顶保活：Lossless Scaling 等全屏输出窗口会抢占 z 序把歌词压下去，
@@ -498,7 +496,7 @@ class LyricWindow(QMainWindow):
         bottom_margin = int(total_height + base)
 
         # 用百分比范围约束；禁区开启时忽略位置范围，改用全屏可用区
-        if self.exclude_region is not None and self.fold_enabled:
+        if self.exclude_region is not None:
             x_min = left_margin + c['persp_extra_x']
             x_max = sw - right_margin - c['persp_extra_x']
             y_min = top_margin + c['persp_extra_y']
@@ -522,7 +520,7 @@ class LyricWindow(QMainWindow):
         # 随机角度放不下整块时降级试更小的角度（包围盒更窄），
         # 尽可能保证整块不进禁区，全部失败才走兜底。
         # 放置时同时检查与预览槽位的碰撞，避免当前句盖住跟读暗态句。
-        if self.exclude_region is not None and self.fold_enabled:
+        if self.exclude_region is not None:
             candidates = [random.randint(self.angle_min, self.angle_max)]
             candidates += [a for a in (0, 1, -1, 2, -2, 3, -3)
                            if self.angle_min <= a <= self.angle_max and a not in candidates]
@@ -652,7 +650,7 @@ class LyricWindow(QMainWindow):
         th = fm.height()
         sw, sh = c['sw'], c['sh']
         base = int(c['base_margin'])
-        region_active = self.exclude_region is not None and self.fold_enabled
+        region_active = self.exclude_region is not None
 
         def _base_range(angle):
             rot_w, rot_h = self._rotated_size(rows, angle, c)
