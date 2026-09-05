@@ -80,15 +80,16 @@ class TimelinePage:
         pos_group.addSettingCard(ymin_card)
         pos_group.addSettingCard(ymax_card)
 
-        # ---- 歌词演出区域 ----
-        self.allowed_region_btn = PushButton(FluentIcon.CLIPPING_TOOL, "选择演出区域")
-        self.allowed_region_btn.setMinimumWidth(120)
-        self.allowed_region_label = CaptionLabel("未设置")
-        region_card = widget_card(
-            FluentIcon.VIEW, "歌词演出区域", self.allowed_region_btn,
-            content="框选一块屏幕区域作为歌词演出范围；未设置时使用上方百分比范围")
-        region_card.hBoxLayout.addWidget(self.allowed_region_label)
-        pos_group.addSettingCard(region_card)
+        # ---- 歌词禁止区域 ----
+        self.exclude_region_btn = PushButton(FluentIcon.CLIPPING_TOOL, "选择禁止区域")
+        self.exclude_region_btn.setMinimumWidth(120)
+        self.exclude_region_status = "未设置"
+        self.exclude_region_label = CaptionLabel(self.exclude_region_status)
+        exclude_card = widget_card(
+            FluentIcon.CANCEL, "歌词禁止区域", self.exclude_region_btn,
+            content="框选一块屏幕区域，歌词不会出现在该区域内；点击已设置的按钮可清除")
+        exclude_card.hBoxLayout.addWidget(self.exclude_region_label)
+        pos_group.addSettingCard(exclude_card)
 
         self.vbox.addWidget(timeline_group)
         self.vbox.addWidget(pos_group)
