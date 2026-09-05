@@ -54,8 +54,8 @@ class LyricSettings:
     pos_y_max: int = 75
     # 歌词透明度（百分比，0=全透明，100=全不透明）
     opacity: int = 100
-    # 歌词禁止区域（像素坐标，None=无禁止区域）
-    exclude_region: Optional[QRect] = None
+    # 歌词演出区域（像素坐标，None=使用百分比范围）
+    allowed_region: Optional[QRect] = None
 
 
 class AppController(QObject):
@@ -414,8 +414,8 @@ class AppController(QObject):
         self._lyric_window.pos_y_max = lyric_settings.pos_y_max
         # 应用歌词透明度
         self._lyric_window.opacity = lyric_settings.opacity
-        # 应用歌词禁止区域
-        self._lyric_window.exclude_region = lyric_settings.exclude_region
+        # 应用歌词演出区域
+        self._lyric_window.allowed_region = lyric_settings.allowed_region
         self._lyric_window.start_lyric(
             lyric_settings.text,
             lyric_settings.font,
@@ -596,11 +596,11 @@ class AppController(QObject):
         if self._lyric_window:
             self._lyric_window.opacity = value
 
-    def set_exclude_region(self, region: Optional[QRect]) -> None:
-        """设置歌词禁止区域（像素坐标，None 表示清除）"""
+    def set_allowed_region(self, region: Optional[QRect]) -> None:
+        """设置歌词演出区域（像素坐标，None 表示使用百分比范围）"""
         if self._lyric_window:
-            self._lyric_window.exclude_region = region
-        self.settings.set_setting('exclude_region',
+            self._lyric_window.allowed_region = region
+        self.settings.set_setting('allowed_region',
                                   {'x': region.x(), 'y': region.y(),
                                    'w': region.width(), 'h': region.height()}
                                   if region else None)

@@ -1,4 +1,4 @@
-"""全屏区域选择覆盖层：用户框选一块屏幕区域（歌词禁止区域）"""
+"""全屏区域选择覆盖层：用户框选歌词演出区域"""
 
 from PyQt5.QtCore import Qt, QRect, QPoint, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPen, QFont
@@ -25,7 +25,6 @@ class RegionSelectOverlay(QWidget):
         self._origin = QPoint()
         self._selection = QRect()
         self._dragging = False
-        self._confirmed = False
         self._init_buttons()
 
     def _init_buttons(self):
@@ -58,13 +57,11 @@ class RegionSelectOverlay(QWidget):
         super().showEvent(event)
         self._selection = QRect()
         self._dragging = False
-        self._confirmed = False
         self._btn_ok.setEnabled(False)
         self._center_buttons()
         self.activateWindow()
 
     def _center_buttons(self):
-        """按钮居中定位"""
         x = (self.width() - self._btn_bar.width()) // 2
         y = self.height() - 70
         self._btn_bar.move(x, y)
@@ -91,28 +88,17 @@ class RegionSelectOverlay(QWidget):
             self.close()
 
     def _confirm(self):
-        self._confirmed = True
         self.region_selected.emit(self._selection)
         self.close()
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        # 半透明全屏背景
         painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
         if not self._selection.isNull():
-            # 清除选区（透明），画边框
-            painter.setCompositionMode(QPainter.CompositionMode_Clear)
-            painter.fillRect(self._selection, Qt.transparent)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            pen = QPen(QColor(76, 175, 80), 2, Qt.DashLine)
-            painter.setPen(pen)
+            painter.setPen(QPen(QColor(76, 175, 80), 2, Qt.DashLine))
+            painter.setBrush(QColor(76, 175, 80, 40))
             painter.drawRect(self._selection)
-            # 尺寸标注
             painter.setPen(QColor(255, 255, 255))
             painter.setFont(QFont("Microsoft YaHei", 10))
-            label = f"{self._selection.width()} x {self._selection.height()}"
-            painter.drawText(
-                self._selection.x() + 4,
-                self._selection.y() + 16,
-                label
-            )
+            label = f"歌词演出区域  {self._selection.width()} x {self._selection.height()}"
+            painter.drawText(self._selection.x() + 4, self._selection.y() - 6, label)

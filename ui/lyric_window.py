@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QMainWindow, QApplication
-from PyQt5.QtCore import Qt, QTimer, QRect
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QPainterPath, QTransform
 import random, time, math
 import ctypes
@@ -93,8 +93,8 @@ class LyricWindow(QMainWindow):
         self.pos_y_max = 75
         # 歌词整体透明度（百分比，0=全透明，100=全不透明）
         self.opacity = 100
-        # 歌词禁止区域（QRect 像素坐标，None=无禁止区域）
-        self.exclude_region = None
+        # 歌词演出区域（QRect 像素坐标，None=使用百分比范围）
+        self.allowed_region = None
         # 防捕获（独立 Overlay）状态：True 时录屏/直播软件捕获不到歌词层
         self._capture_excluded = False
         # 置顶保活：Lossless Scaling 等全屏输出窗口会抢占 z 序把歌词压下去，
@@ -431,13 +431,13 @@ class LyricWindow(QMainWindow):
         top_margin = int(base)
         bottom_margin = int(total_height + base)
 
-        # 有禁止区域时忽略百分比范围，用全屏作为可选区域；
-        # 无禁止区域时用百分比范围约束
-        if self.exclude_region is not None:
-            x_min = left_margin + c['persp_extra_x']
-            x_max = sw - right_margin - c['persp_extra_x']
-            y_min = top_margin + c['persp_extra_y']
-            y_max = sh - bottom_margin - c['persp_extra_y']
+        # 有演出区域时直接在里面随机；无演出区域时用百分比范围
+        if self.allowed_region is not None:
+            r = self.allowed_region
+            x_min = max(r.x(), left_margin + c['persp_extra_x'])
+            x_max = min(r.x() + r.width(), sw) - right_margin - c['persp_extra_x']
+            y_min = max(r.y(), top_margin + c['persp_extra_y'])
+            y_max = min(r.y() + r.height(), sh) - bottom_margin - c['persp_extra_y']
         else:
             x_min = max(c['user_x_min'], left_margin + c['persp_extra_x'])
             x_max = min(c['user_x_max'], sw - right_margin - c['persp_extra_x'])
@@ -453,70 +453,10 @@ class LyricWindow(QMainWindow):
             y_max = max(y_min + 1, sh - bottom_margin - c['persp_extra_y'])
 
         # self.x 是文本左边缘，self.y 是文本基线位置
+        self.x = random.randint(x_min, x_max)
+        self.y = random.randint(y_min, y_max)
         self.angle = random.randint(self.angle_min, self.angle_max)
-        placed = False
-        for _ in range(20):
-            self.x = random.randint(x_min, x_max)
-            self.y = random.randint(y_min, y_max)
-            if not self._overlaps_exclude_region(rotated_w, total_height, base):
-                placed = True
-                break
-        # 随机采样全失败时，紧贴禁区边缘放置（保证不落在禁区内）
-        if not placed and self.exclude_region is not None:
-            self._place_adjacent_to_exclude(
-                x_min, x_max, y_min, y_max, rotated_w, total_height, base)
         self.compute_perspective()
-
-    def _overlaps_exclude_region(self, text_w, text_h, padding):
-        """当前 (x, y) 位置的文本包围盒是否与禁止区域重叠"""
-        r = self.exclude_region
-        if r is None:
-            return False
-        # 文本包围盒（含发光/阴影边距）
-        tx, ty = int(self.x - padding), int(self.y - text_h - padding)
-        tw, th = int(text_w + 2 * padding), int(text_h + 2 * padding)
-        return (tx < r.x() + r.width() and tx + tw > r.x() and
-                ty < r.y() + r.height() and ty + th > r.y())
-
-    def _place_adjacent_to_exclude(self, x_min, x_max, y_min, y_max,
-                                   text_w, text_h, padding):
-        """随机采样失败时，确定性地放在禁区旁边最大侧"""
-        r = self.exclude_region
-        rw = int(text_w + 2 * padding)
-        rh = int(text_h + 2 * padding)
-        # 四边可用空间
-        candidates = []
-        if r.x() - x_min >= rw:
-            candidates.append(('left', r.x() - x_min))
-        if x_max - (r.x() + r.width()) >= rw:
-            candidates.append(('right', x_max - (r.x() + r.width())))
-        if r.y() - y_min >= rh:
-            candidates.append(('top', r.y() - y_min))
-        if y_max - (r.y() + r.height()) >= rh:
-            candidates.append(('bottom', y_max - (r.y() + r.height())))
-        if not candidates:
-            self.x, self.y = x_min, y_min + text_h
-            return
-        side, _ = max(candidates, key=lambda s: s[1])
-        # 主轴紧贴禁区边缘，交叉轴对齐禁区顶/左
-        if side == 'left':
-            self.x = r.x() - rw
-            self.y = r.y()
-        elif side == 'right':
-            self.x = r.x() + r.width()
-            self.y = r.y()
-        elif side == 'top':
-            self.y = r.y() - rh + text_h
-            self.x = r.x()
-        else:
-            self.y = r.y() + r.height() + rh + text_h
-            self.x = r.x()
-        # 验证并修正
-        if self._overlaps_exclude_region(text_w, text_h, padding):
-            if side in ('left', 'right'):
-                self.y = r.y() + r.height() + rh + text_h
-            else:
-                self.x = r.x() + r.width() + rw
 
     # ---- 跟读预点亮：暗态槽位的左右分区放置与碰撞规避 ----
 
