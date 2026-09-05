@@ -52,6 +52,8 @@ class LyricSettings:
     pos_x_max: int = 85
     pos_y_min: int = 5
     pos_y_max: int = 75
+    # 歌词透明度（百分比，0=全透明，100=全不透明）
+    opacity: int = 100
 
 
 class AppController(QObject):
@@ -408,6 +410,8 @@ class AppController(QObject):
         self._lyric_window.pos_x_max = lyric_settings.pos_x_max
         self._lyric_window.pos_y_min = lyric_settings.pos_y_min
         self._lyric_window.pos_y_max = lyric_settings.pos_y_max
+        # 应用歌词透明度
+        self._lyric_window.opacity = lyric_settings.opacity
         self._lyric_window.start_lyric(
             lyric_settings.text,
             lyric_settings.font,
@@ -582,6 +586,11 @@ class AppController(QObject):
         """设置歌词起始 Y 最大值（百分比）"""
         if self._lyric_window:
             self._lyric_window.pos_y_max = value
+
+    def set_opacity(self, value: int) -> None:
+        """设置歌词整体透明度（百分比，0=全透明，100=全不透明）"""
+        if self._lyric_window:
+            self._lyric_window.opacity = value
 
     def filter_credit_lines(self, text: str) -> str:
         """过滤掉歌词中的编曲作词等标注行"""

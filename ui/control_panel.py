@@ -157,6 +157,7 @@ class ControlPanel(FluentWindow):
             t.pos_x_max_s.setValue(settings.get_setting('pos_x_max', 85))
             t.pos_y_min_s.setValue(settings.get_setting('pos_y_min', 5))
             t.pos_y_max_s.setValue(settings.get_setting('pos_y_max', 75))
+            a.opacity_slider.setValue(settings.get_setting('opacity', 100))
             source_name = settings.get_setting('source', '网易云')
             idx = p.source_combo.findText(source_name)
             if idx >= 0:
@@ -203,6 +204,7 @@ class ControlPanel(FluentWindow):
             'pos_x_max': t.pos_x_max_s.value(),
             'pos_y_min': t.pos_y_min_s.value(),
             'pos_y_max': t.pos_y_max_s.value(),
+            'opacity': a.opacity_slider.value(),
             'player': p.player_combo.currentText(),
             'source': p.source_combo.currentText(),
             'perspective_enabled': n.perspective_check.isChecked(),
@@ -327,12 +329,18 @@ class ControlPanel(FluentWindow):
                        t.pos_y_max_lbl.setText(f"{v}%"))
         )
 
+        # 歌词透明度：调整时实时生效
+        a.opacity_slider.valueChanged.connect(
+            lambda v: (self.controller.set_opacity(v),
+                       a.opacity_label.setText(f"{v}%"))
+        )
+
         # 同步所有滑块标签（加载配置后标签可能未更新）
         self._sync_slider_labels()
 
     def _sync_slider_labels(self) -> None:
         """同步滑块数值标签与当前值一致"""
-        n, t = self._animation, self._timeline
+        a, n, t = self._appearance, self._animation, self._timeline
         n.glow_size_label.setText(str(n.glow_size_slider.value()))
         n.glow_alpha_label.setText(str(n.glow_alpha_slider.value()))
         n.shake_intensity_label.setText(str(n.shake_intensity_slider.value()))
@@ -346,6 +354,7 @@ class ControlPanel(FluentWindow):
         t.pos_x_max_lbl.setText(f"{t.pos_x_max_s.value()}%")
         t.pos_y_lbl.setText(f"{t.pos_y_min_s.value()}%")
         t.pos_y_max_lbl.setText(f"{t.pos_y_max_s.value()}%")
+        a.opacity_label.setText(f"{a.opacity_slider.value()}%")
 
     def _refresh_player_list(self) -> None:
         """刷新播放器下拉列表"""
@@ -631,6 +640,7 @@ class ControlPanel(FluentWindow):
             pos_x_max=t.pos_x_max_s.value(),
             pos_y_min=t.pos_y_min_s.value(),
             pos_y_max=t.pos_y_max_s.value(),
+            opacity=a.opacity_slider.value(),
         )
         self.controller.start_playback(lyric_settings)
 

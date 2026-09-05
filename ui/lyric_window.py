@@ -91,6 +91,8 @@ class LyricWindow(QMainWindow):
         self.pos_x_max = 85
         self.pos_y_min = 5
         self.pos_y_max = 75
+        # 歌词整体透明度（百分比，0=全透明，100=全不透明）
+        self.opacity = 100
         # 防捕获（独立 Overlay）状态：True 时录屏/直播软件捕获不到歌词层
         self._capture_excluded = False
         # 置顶保活：Lossless Scaling 等全屏输出窗口会抢占 z 序把歌词压下去，
@@ -865,6 +867,7 @@ class LyricWindow(QMainWindow):
 
     def paintEvent(self, event):
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
+        painter.setOpacity(self.opacity / 100.0)
         for f in self.fading_lines: f.draw(painter)
         # 暗态预点亮槽位画在最底层、且在早退返回之前：
         # 保证逐字间隙（char_index=0）期间未读句不闪断

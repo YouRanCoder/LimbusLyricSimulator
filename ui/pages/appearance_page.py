@@ -12,7 +12,7 @@ from qfluentwidgets import (
     SpinBox,
 )
 
-from .base import make_scroll_page, widget_card
+from .base import make_scroll_page, slider_card, widget_card
 
 
 class AppearancePage:
@@ -79,7 +79,16 @@ class AppearancePage:
         color_group.addSettingCard(widget_card(FluentIcon.MOVE, "字间距（px）", self.spacing_spin,
             content="逐字动画时每个字符之间的额外间距：负值=字符重叠，0=紧贴，正值=拉开"))
 
+        # ---- 透明度 ----
+        opacity_card, self.opacity_slider, self.opacity_label = slider_card(
+            FluentIcon.BRIGHTNESS, "歌词透明度", 0, 100, 100, suffix="%",
+            content="整体透明度：100%=完全不透明，0%=完全透明")
+
+        opacity_group = SettingCardGroup("透明度", self.page)
+        opacity_group.addSettingCard(opacity_card)
+
         self.vbox.addWidget(preset_group)
         self.vbox.addWidget(font_group)
         self.vbox.addWidget(color_group)
+        self.vbox.addWidget(opacity_group)
         self.vbox.addStretch(1)
