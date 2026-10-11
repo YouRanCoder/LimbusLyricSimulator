@@ -13,7 +13,8 @@
 import logging
 
 from PyQt5.QtCore import QRect, QTimer
-from PyQt5.QtGui import QColor, QFont, QFontDatabase
+from PyQt5.QtGui import QColor, QFont, QFontDatabase, QDesktopServices
+from PyQt5.QtCore import QUrl
 from PyQt5.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon
 
 from qfluentwidgets import (
@@ -26,8 +27,9 @@ import qasync
 from core.app_controller import AppController, LyricSettings
 from core.autostart import is_autostart_enabled, set_autostart
 from core.fetcher import is_pure_music
-from ui.dialogs import PlayerConfigDialog, ask_text, confirm, warn
-from ui.pages import AnimationPage, AppearancePage, PlaybackPage, TimelinePage
+from config.logging_setup import get_log_dir
+from ui.dialogs import UpdateDialog, PlayerConfigDialog, ask_text, confirm, info, warn
+from ui.pages import AnimationPage, AppearancePage, MiscPage, PlaybackPage, TimelinePage
 from ui.region_overlay import RegionSelectOverlay
 
 
@@ -65,11 +67,13 @@ class ControlPanel(FluentWindow):
         self._appearance = AppearancePage()
         self._animation = AnimationPage()
         self._timeline = TimelinePage()
+        self._misc = MiscPage()
 
         self.addSubInterface(self._playback.page, FluentIcon.MUSIC, "播放")
         self.addSubInterface(self._appearance.page, FluentIcon.PALETTE, "外观")
         self.addSubInterface(self._animation.page, FluentIcon.MOVE, "动画")
         self.addSubInterface(self._timeline.page, FluentIcon.STOP_WATCH, "时间")
+        self.addSubInterface(self._misc.page, FluentIcon.MORE, "杂项")
 
         self.setWindowTitle("歌词字幕器 - 控制面板")
         # 窗口尺寸按屏幕分辨率自适应
@@ -104,6 +108,11 @@ class ControlPanel(FluentWindow):
         # 系统托盘（最小化到托盘）
         self._init_tray()
 
+        # 启动时自动检查更新（延迟数秒，等界面与播放器监听就绪后再联网；
+        # 仅发现新版本时弹窗，无更新/失败保持安静）
+        if settings.get_setting('auto_update_check', True):
+            QTimer.singleShot(5000, lambda: self.controller.check_for_update(silent=True))
+
         # 启动播放器监听（延迟到事件循环运行后）
         QTimer.singleShot(0, self.controller.start_player_listener)
 
@@ -112,6 +121,7 @@ class ControlPanel(FluentWindow):
     def _load_settings(self, settings) -> None:
         """从配置管理器加载设置到 UI 控件"""
         p, a, n, t = self._playback, self._appearance, self._animation, self._timeline
+        m = self._misc
         try:
             a.color_btn.setColor(QColor(settings.get_setting('text_color', '#fffeef')))
             a.stroke_btn.setColor(QColor(settings.get_setting('stroke_color', '#d8a523')))
@@ -166,6 +176,7 @@ class ControlPanel(FluentWindow):
             t.pos_y_min_s.setValue(settings.get_setting('pos_y_min', 5))
             t.pos_y_max_s.setValue(settings.get_setting('pos_y_max', 75))
             a.opacity_slider.setValue(settings.get_setting('opacity', 100))
+            m.auto_update_check.setChecked(settings.get_setting('auto_update_check', True))
             self._exclude_region = settings.get_setting('exclude_region', None)
             self._update_exclude_region_label()
 
@@ -179,6 +190,7 @@ class ControlPanel(FluentWindow):
     def _collect_ui_settings(self) -> dict:
         """从 UI 控件收集当前设置（供保存配置使用）"""
         p, a, n, t = self._playback, self._appearance, self._animation, self._timeline
+        m = self._misc
         return {
             'text_color': a.color_btn.color.name(),
             'stroke_color': a.stroke_btn.color.name(),
@@ -217,6 +229,7 @@ class ControlPanel(FluentWindow):
             'pos_y_min': t.pos_y_min_s.value(),
             'pos_y_max': t.pos_y_max_s.value(),
             'opacity': a.opacity_slider.value(),
+            'auto_update_check': m.auto_update_check.isChecked(),
             'exclude_region': self._exclude_region,
             'player': p.player_combo.currentText(),
             'source': p.source_combo.currentText(),
@@ -242,6 +255,8 @@ class ControlPanel(FluentWindow):
         self.controller.playback_status_updated.connect(self._on_playback_status_updated)
         self.controller.progress_unsupported_warning.connect(self._on_progress_unsupported_warning)
         self.controller.netease_log_init_failed.connect(self._on_netease_log_init_failed)
+        self.controller.update_check_finished.connect(self._on_update_check_finished)
+        self.controller.elog_clear_finished.connect(self._on_elog_clear_finished)
 
     def _connect_ui_events(self) -> None:
         """连接 UI 控件事件到 Controller 方法"""
@@ -356,6 +371,13 @@ class ControlPanel(FluentWindow):
 
         # 歌词禁止区域：点击按钮打开框选覆盖层
         t.exclude_region_btn.clicked.connect(self._on_exclude_region_btn)
+
+        # 版本更新：手动检查 + 启动自动检查开关持久化（杂项页）
+        m = self._misc
+        m.update_btn.clicked.connect(self._on_check_update)
+        m.auto_update_check.checkedChanged.connect(self._on_auto_update_changed)
+        m.open_log_btn.clicked.connect(self._on_open_log_dir)
+        m.elog_clean_btn.clicked.connect(self._on_clear_netease_elog)
 
         # 同步所有滑块标签（加载配置后标签可能未更新）
         self._sync_slider_labels()
@@ -762,6 +784,88 @@ class ControlPanel(FluentWindow):
         p.autostart_check.setChecked(not enabled)
         p.autostart_check.blockSignals(False)
         warn(self, "开机自启动", "设置开机自启动失败，请稍后重试")
+
+    @qasync.asyncSlot()
+    async def _on_check_update(self) -> None:
+        """手动检查更新：期间按钮禁用防重复点击"""
+        m = self._misc
+        logger.info("用户点击检查更新")
+        m.update_btn.setEnabled(False)
+        m.update_btn.setText("检查中...")
+        try:
+            await self.controller.check_for_update(silent=False)
+        finally:
+            m.update_btn.setEnabled(True)
+            m.update_btn.setText("检查更新")
+
+    def _on_open_log_dir(self) -> None:
+        """打开日志目录（log/，含 latest.log）"""
+        log_dir = get_log_dir()
+        logger.info("打开日志目录：%s", log_dir)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir)))
+
+    @qasync.asyncSlot()
+    async def _on_clear_netease_elog(self) -> None:
+        """清理网易云日志：先弹窗确认（展示当前大小与注意事项），确认后执行"""
+        m = self._misc
+        size = self.controller.get_netease_elog_size()
+        if not size:
+            info(self, "清理网易云日志", "未检测到网易云日志文件，无需清理")
+            return
+        size_mb = size / 1024 / 1024
+        if not confirm(
+            self, "清理网易云日志",
+            f"将删除网易云的 cloudmusic.elog（当前 {size_mb:.1f} MB），"
+            "网易云音乐会在下次运行时自动重建。\n\n"
+            "注意：清理时需要短暂停止歌词同步，完成后自动恢复。\n"
+            "如果网易云音乐正在播放，建议先切到暂停再清理。确定清理吗？",
+        ):
+            return
+        logger.info("用户确认清理网易云 elog（%.1f MB）", size_mb)
+        m.elog_clean_btn.setEnabled(False)
+        m.elog_clean_btn.setText("清理中...")
+        try:
+            await self.controller.clear_netease_elog()
+        finally:
+            m.elog_clean_btn.setEnabled(True)
+            m.elog_clean_btn.setText("清理")
+            self._refresh_netease_elog_size()
+
+    def _refresh_netease_elog_size(self) -> None:
+        """刷新网易云 elog 大小标签"""
+        size = self.controller.get_netease_elog_size()
+        self._misc.elog_label.setText(f"{size / 1024 / 1024:.1f} MB" if size else "未检测到")
+
+    def _on_elog_clear_finished(self, result) -> None:
+        """网易云 elog 清理完成：提示结果"""
+        if result.success:
+            if result.freed_bytes:
+                logger.info("网易云 elog 清理成功，释放 %s", result.freed_mb)
+                info(self, "清理网易云日志", f"清理完成，释放 {result.freed_mb} 空间")
+            else:
+                info(self, "清理网易云日志", "日志文件不存在，无需清理")
+        else:
+            warn(self, "清理网易云日志", f"清理失败：{result.error}")
+
+    def _on_auto_update_changed(self, enabled: bool) -> None:
+        """启动自动检查更新开关：立即持久化"""
+        self.controller.settings.set_setting('auto_update_check', enabled)
+        logger.info("启动时自动检查更新已%s", "开启" if enabled else "关闭")
+
+    def _on_update_check_finished(self, result) -> None:
+        """版本检查完成：发现新版本弹更新日志，否则提示已是最新/失败原因"""
+        if result.error:
+            warn(self, "检查更新失败", f"检查更新失败：{result.error}")
+            return
+        if result.has_update:
+            dialog = UpdateDialog(
+                result.current_version, result.latest_version,
+                changelog=result.changelog, release_url=result.release_url,
+                parent=self)
+            dialog.exec()
+        else:
+            info(self, "检查更新",
+                 f"当前已是最新版本 v{result.current_version}")
 
     def _on_exclude_capture_changed(self, enabled: bool) -> None:
         """防捕获开关：套用到歌词窗口；开启时联动关闭「允许 OBS 窗口捕获」

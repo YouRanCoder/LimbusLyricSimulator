@@ -9,6 +9,7 @@
 """
 
 from dataclasses import dataclass
+import asyncio
 import re
 from typing import Optional, Callable, Dict, Any
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QRect
@@ -17,6 +18,8 @@ import qasync
 from core.player_manager import PlayerManager
 from core.lyric_service import LyricService, LyricResult
 from core.settings_manager import SettingsManager
+from core.update_checker import check_for_update
+from core.elog_cleaner import clear_netease_elog, get_netease_elog_size
 from core.fetcher import Fetcher, FetcherEvent, MediaChange, MediaInfo
 from config.settings import DEFAULT_CREDIT_PATTERNS
 import logging
@@ -97,6 +100,12 @@ class AppController(QObject):
 
     # 网易云日志适配器初始化失败通知（UI 层据此弹出警告框）
     netease_log_init_failed = pyqtSignal(str)  # (reason)
+
+    # 版本检查完成通知（UI 层据此弹出更新弹窗/已是最新提示）
+    update_check_finished = pyqtSignal(object)  # (UpdateCheckResult)
+
+    # 网易云 elog 清理完成通知（UI 层据此弹出结果提示）
+    elog_clear_finished = pyqtSignal(object)  # (ElogClearResult)
     def __init__(self, settings: Optional[SettingsManager] = None):
         super().__init__()
         
@@ -280,6 +289,46 @@ class AppController(QObject):
         """枚举当前所有 SMTC 会话（不排除已配置的播放器），供修改播放器时重新筛选"""
         from core.fetcher import list_smtc_sessions as _list_smtc_sessions
         return await _list_smtc_sessions()
+
+    @qasync.asyncSlot()
+    async def check_for_update(self, silent: bool = False) -> None:
+        """检查版本更新（不下载，仅获取最新版本信息）
+
+        Args:
+            silent: 静默模式（启动时自动检查）。静默下仅发现新版本才发信号，
+                    无更新/失败保持安静；手动检查则始终通知 UI。
+        """
+        result = await check_for_update()
+        if silent and not result.has_update:
+            # 静默检查无更新（或失败）时不再打扰用户
+            if result.error:
+                logger.info("启动时版本检查未完成：%s", result.error)
+            return
+        self.update_check_finished.emit(result)
+
+    def get_netease_elog_size(self) -> int:
+        """获取网易云 elog 文件大小（字节），供 UI 展示与确认弹窗"""
+        return get_netease_elog_size()
+
+    @qasync.asyncSlot()
+    async def clear_netease_elog(self) -> None:
+        """清理网易云 elog：先停日志监听释放文件句柄，清理后重启监听"""
+        current = self.player_manager.current_player_name
+        is_netease = current == '网易云音乐'
+        if is_netease and self.player_manager.current_fetcher:
+            logger.info("清理前停止网易云日志监听，释放文件句柄")
+            self.player_manager.current_fetcher.stop()
+
+        result = await asyncio.to_thread(clear_netease_elog)
+
+        if is_netease and self.player_manager.current_fetcher:
+            # 重启监听（文件不存在时依赖库会等待重建，无需特殊处理）
+            logger.info("清理后重启网易云日志监听")
+            self.player_manager.current_fetcher.start()
+
+        self.elog_clear_finished.emit(result)
+
+
 
     def add_player(self, name: str, process: str,
                    support_progress: bool = True) -> bool:

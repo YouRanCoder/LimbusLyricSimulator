@@ -8,6 +8,7 @@ import qasync
 
 from config.logging_setup import setup_logging
 from core.settings_manager import SettingsManager
+from core.version import APP_VERSION
 from core.app_controller import AppController
 from ui.control_panel import ControlPanel
 from ui.lyric_window import LyricWindow
@@ -42,9 +43,10 @@ if __name__ == "__main__":
         # PyInstaller 打包后不含 dist-info，取不到版本号时降级为未知
         detector_version = "未知（打包环境）"
     logger.info(
-        "运行环境：Python %s，netease-cloudmusic-detector %s",
+        "运行环境：Python %s，netease-cloudmusic-detector %s，应用版本 v%s",
         sys.version.split()[0],
         detector_version,
+        APP_VERSION,
     )
 
     # 0.5 启用高 DPI 缩放（必须在 QApplication 创建前设置），

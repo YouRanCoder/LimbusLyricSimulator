@@ -1,5 +1,9 @@
-"""Fluent 风格对话框：文本输入、播放器配置与确认对话框"""
+"""Fluent 风格对话框：文本输入、播放器配置、更新日志与确认对话框"""
 
+import logging
+
+from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtCore import QUrl
 from PyQt5.QtWidgets import QDialog, QHBoxLayout, QWidget
 
 from qfluentwidgets import (
@@ -11,7 +15,10 @@ from qfluentwidgets import (
     MessageBoxBase,
     SubtitleLabel,
     SwitchButton,
+    TextBrowser,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TextInputDialog(MessageBoxBase):
@@ -136,12 +143,54 @@ def ask_select(parent, title: str, items: list) -> str:
     return ""
 
 
+class UpdateDialog(MessageBoxBase):
+    """发现新版本对话框：展示版本号、更新日志，引导前往 Release 页自行下载"""
+
+    def __init__(self, current_version: str, latest_version: str,
+                 changelog: str = "", release_url: str = "", parent=None):
+        super().__init__(parent)
+        self.release_url = release_url
+        self.titleLabel = SubtitleLabel(f"发现新版本 v{latest_version}", self)
+        self.versionLabel = CaptionLabel(f"当前版本 v{current_version} → 最新版本 v{latest_version}")
+        self.versionLabel.setStyleSheet("color: rgba(128, 128, 128, 0.9);")
+
+        # 更新日志（只读展示，无日志时给出兜底文案）
+        self.logBrowser = TextBrowser(self)
+        self.logBrowser.setReadOnly(True)
+        self.logBrowser.setPlainText(
+            changelog if changelog else "本次更新暂未填写更新日志，详见 Release 页面。")
+        self.logBrowser.setMinimumSize(460, 220)
+
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.versionLabel)
+        self.viewLayout.addWidget(self.logBrowser)
+
+        self.yesButton.setText("前往下载")
+        self.cancelButton.setText("以后再说")
+        self.widget.setMinimumWidth(500)
+
+    def accept(self) -> None:
+        """点击「前往下载」：打开 Release 页面让用户自行下载"""
+        if self.release_url:
+            logger.info("打开下载页面：%s", self.release_url)
+            QDesktopServices.openUrl(QUrl(self.release_url))
+        super().accept()
+
+
 def confirm(parent, title: str, content: str) -> bool:
     """弹出确认对话框，返回是否确认"""
     box = MessageBox(title, content, parent)
     box.yesButton.setText("确定")
     box.cancelButton.setText("取消")
     return box.exec() == QDialog.Accepted
+
+
+def info(parent, title: str, content: str) -> None:
+    """弹出信息对话框（只有一个确定按钮）"""
+    box = MessageBox(title, content, parent)
+    box.yesButton.setText("确定")
+    box.cancelButton.hide()
+    box.exec()
 
 
 def warn(parent, title: str, content: str) -> None:
