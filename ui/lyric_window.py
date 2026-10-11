@@ -564,9 +564,12 @@ class LyricWindow(QMainWindow):
         return valid
 
     def _collides_with_preview_slots(self, rect):
-        """包围盒是否与任何存活暗态槽位重叠（不含当前句自身）"""
+        """包围盒是否与任何存活暗态槽位或残影重叠（不含当前句自身）"""
         for s in self.preview_slots:
             if self._rects_overlap(rect, self._rotated_aabb(s['x'], s['y'], s['rows'], s['angle'])):
+                return True
+        for aabb in self._fading_aabbs():
+            if self._rects_overlap(rect, aabb):
                 return True
         return False
 
@@ -652,24 +655,49 @@ class LyricWindow(QMainWindow):
                 self.wrapped_lines,
                 lambda ang: self._x_y_range(self.wrapped_lines, c),
                 self._collides_with_preview_slots)
+            if not placed:
+                # 多角度仍放不下（屏幕拥挤）：按宽度阶梯重排折行再试
+                # （折更窄→块更瘦，折更宽→块更矮），提高腾出空位的概率
+                new_rows = self.wrapped_lines
+                for new_rows in self._reflow_variants(self.wrapped_lines, self.full_text):
+                    placed, is_fb, px, py, pang = self._place_free(
+                        new_rows,
+                        lambda ang, rr=new_rows: self._x_y_range(rr, c),
+                        self._collides_with_preview_slots)
+                    if placed:
+                        self.wrapped_lines = new_rows
+                        self.init_char_shakes()
+                        break
+                else:
+                    # 全部变体仍失败（或无可产出变体）：兜底落点按最后
+                    # 采样的折行形状，沿用其折行防溢出；无变体则维持原折行
+                    if new_rows is not self.wrapped_lines:
+                        self.wrapped_lines = new_rows
+                        self.init_char_shakes()
             self.angle = pang; self.x = px; self.y = py
         self.compute_perspective()
 
     def _place_free(self, rows, range_fn, collides_fn):
         """无禁区时的随机放置，返回 (placed, is_fallback, x, y, angle)
 
-        range_fn(angle) 提供采样范围（通常与角度无关）；40 次尝试
-        找不到不重叠的点则随机落点兜底（is_fallback=True）。
+        每个角度采样 40 次；失败则换角度再试——宽句在随机角度下旋转
+        包围盒的形状差异极大（±10° 时高度可差数倍），单角度 40 次全
+        碰撞很常见，多角度能显著提高找到空位的概率。所有角度都失败
+        才随机落点兜底（is_fallback=True，允许少量重叠，保证句子不消失）。
         """
-        angle = random.randint(self.angle_min, self.angle_max)
-        x_min, x_max, y_min, y_max = range_fn(angle)
-        for _ in range(40):
-            x = random.randint(x_min, x_max)
-            y = random.randint(y_min, y_max)
-            if not collides_fn(self._rotated_aabb(x, y, rows, angle)):
-                return True, False, x, y, angle
+        angles = [random.randint(self.angle_min, self.angle_max)]
+        angles += [a for a in (0, 1, -1, 2, -2, 3, -3, 5, -5, 8, -8)
+                   if self.angle_min <= a <= self.angle_max and a not in angles]
+        for angle in angles:
+            x_min, x_max, y_min, y_max = range_fn(angle)
+            for _ in range(40):
+                x = random.randint(x_min, x_max)
+                y = random.randint(y_min, y_max)
+                if not collides_fn(self._rotated_aabb(x, y, rows, angle)):
+                    return True, False, x, y, angle
+        x_min, x_max, y_min, y_max = range_fn(angles[0])
         return (False, True, random.randint(x_min, x_max),
-                random.randint(y_min, y_max), angle)
+                random.randint(y_min, y_max), angles[0])
 
     def _place_in_bands(self, rows, c, range_fn, collides_fn):
         """在禁区安全带内为给定折行放置，返回 (placed, is_fallback, x, y, angle)
@@ -820,15 +848,33 @@ class LyricWindow(QMainWindow):
         pad = c['glow_margin'] + c['shadow_margin']
         return (x - pad, y - th - pad, rot_w, rot_h)
 
+    def _fading_aabbs(self):
+        """收集残影（FadingLine）的包围盒，供碰撞规避使用
+
+        残影淡出前仍占着屏幕：新当前句与暗态槽位放置时若不查残影，
+        换句瞬间极易压在未淡完的旧句上（视觉重叠的主要来源之一）。
+        """
+        rects = []
+        for f in self.fading_lines:
+            rects.append(self._rotated_aabb(f.x, f.y, f.lines, f.angle))
+        return rects
+
     def _slot_collides(self, rect):
-        """包围盒是否与当前句或任何存活暗态槽位重叠"""
-        if self.wrapped_lines and self.full_text:
-            if self._rects_overlap(rect, self._rotated_aabb(self.x, self.y, self.wrapped_lines, self.angle)):
-                return True
-        for s in self.preview_slots:
-            if self._rects_overlap(rect, self._rotated_aabb(s['x'], s['y'], s['rows'], s['angle'])):
+        """包围盒是否与当前句、残影或任何存活暗态槽位重叠"""
+        for aabb in self._occupant_aabbs():
+            if self._rects_overlap(rect, aabb):
                 return True
         return False
+
+    def _occupant_aabbs(self):
+        """当前句 + 残影 + 所有暗态槽位的包围盒（放置碰撞检测用）"""
+        occ = []
+        if self.wrapped_lines and self.full_text:
+            occ.append(self._rotated_aabb(self.x, self.y, self.wrapped_lines, self.angle))
+        occ.extend(self._fading_aabbs())
+        for s in self.preview_slots:
+            occ.append(self._rotated_aabb(s['x'], s['y'], s['rows'], s['angle']))
+        return occ
 
     @staticmethod
     def _rects_overlap(a, b):
@@ -870,16 +916,22 @@ class LyricWindow(QMainWindow):
                 x_max = min(c['user_x_max'], sw - int(rot_w) - base - c['persp_extra_x'])
                 y_min = max(c['user_y_min'], int(th) + c['persp_extra_y'])
                 y_max = min(c['user_y_max'], sh - int(rot_h) - int(th) - c['persp_extra_y'])
-            # 常规范围放不下（长句/小屏）：放宽到可用区居中，保证句子不消失
+            # 常规范围放不下（长句/小屏）：与 _x_y_range 同策略回退——
+            # 该轴放宽到全屏可用区，避免范围塌成单点后所有槽位叠在同一处
             if x_max <= x_min:
-                x_min = x_max = max(base + c['persp_extra_x'], int((sw - rot_w) / 2))
+                x_min = base + c['persp_extra_x']
+                x_max = max(x_min + 1, sw - int(rot_w) - base - c['persp_extra_x'])
             if y_max <= y_min:
-                y_min = y_max = max(int(th), int((sh - rot_h - th) / 2))
+                y_min = int(th) + c['persp_extra_y']
+                y_max = max(y_min + 1, sh - int(rot_h) - int(th) - c['persp_extra_y'])
             return x_min, x_max, y_min, y_max
 
-        # 放置判定：与当前句及已有暗态槽位都不重叠
-        def _slot_free(aabb):
-            return not self._slot_collides(aabb)
+        # 放置判定：直接传碰撞谓词 _slot_collides（collides_fn 契约：
+        # 碰撞返回 True，采样器接受第一个不碰撞的点）。
+        # 之前这里写成 `not self._slot_collides(aabb)`，把"是否空闲"
+        # 当成"是否碰撞"传入，语义正好相反——采样器变成专挑重叠点
+        # 放置，这是预点亮槽位叠在当前句上的根本原因。
+        collides = self._slot_collides
 
         # ---- 主阶段：优先放安全带内且不与其他块重叠的点 ----
         # fallback 记录每个角度/带第一个候选，全部失败时用它兜底
@@ -887,12 +939,22 @@ class LyricWindow(QMainWindow):
         chosen_rows = rows
         if not region_active:
             placed, is_fb, px, py, pang = self._place_free(
-                rows, _base_range, _slot_free)
+                rows, _base_range, collides)
+            if not placed:
+                # 多角度仍放不下（屏幕拥挤）：按宽度阶梯重排折行再试，
+                # 与 place_randomly 无禁区路径同一策略
+                for new_rows in self._reflow_variants(rows, self.lyric_timeline[idx][1]):
+                    placed, is_fb, px, py, pang = self._place_free(
+                        new_rows, _base_range, collides)
+                    # 兜底落点按该变体形状采样，必须沿用其折行防溢出
+                    chosen_rows = new_rows
+                    if placed:
+                        break
         else:
             placed, is_fb, px, py, pang = self._place_in_bands(
                 rows, c,
                 lambda ang, rr=rows: _base_range(ang, rr),
-                _slot_free)
+                collides)
             if not placed and not is_fb:
                 # 所有角度都切不出安全带：按宽度阶梯重排折行再试
                 # （折更宽→块更矮适配上下带，折更窄→块更瘦适配左右带）
@@ -900,21 +962,24 @@ class LyricWindow(QMainWindow):
                     placed, is_fb, px, py, pang = self._place_in_bands(
                         new_rows, c,
                         lambda ang, rr=new_rows: _base_range(ang, rr),
-                        _slot_free)
+                        collides)
+                    # 兜底落点按该变体形状采样，必须沿用其折行防溢出
+                    chosen_rows = new_rows
                     if placed:
-                        chosen_rows = new_rows
                         break
         if placed:
             self._add_preview_slot(idx, chosen_rows, px, py, pang)
             return
         if is_fb:
-            # 全部尝试失败（屏幕拥挤）：用首个候选兜底（少量重叠）
+            # 全部尝试失败（屏幕拥挤）：用首个候选兜底（少量重叠）。
+            # 若兜底点来自折行变体的采样范围，必须沿用该变体的折行，
+            # 否则宽句配窄范围会溢出屏幕
             self._add_preview_slot(idx, chosen_rows, px, py, pang)
             return
         # 所有角度/折行变体都切不出安全带（大禁区+长句盖满采样范围）的
         # 极端退化：退回全范围随机放置（可能侵入禁区），保证句子不消失
         x_min, x_max, y_min, y_max = _base_range(self.angle_min)
-        self._add_preview_slot(idx, rows, random.randint(x_min, x_max),
+        self._add_preview_slot(idx, chosen_rows, random.randint(x_min, x_max),
                                random.randint(y_min, y_max), self.angle_min)
 
     def _add_preview_slot(self, idx, rows, x, y, angle):
