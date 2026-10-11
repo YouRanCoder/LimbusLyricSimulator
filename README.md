@@ -70,4 +70,4 @@ uv run main.py
 
 如果你点完star也欢迎你提交PR，如果你实在是想帮我回本一下token费用，那么我真的非常感谢！！！
 
-![](images\README\donate_me.png)
+![赞赏码](images/README/donate_me.png)
