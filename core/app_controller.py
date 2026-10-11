@@ -154,8 +154,11 @@ class AppController(QObject):
         self._lyric_window.preview_keep_dim = bool(
             self.settings.get_setting('preview_keep_dim', True))
 
-        # 应用已保存的防捕获设置（独立 Overlay：录屏/直播软件不可见）
-        if self.settings.get_setting('exclude_from_capture', False):
+        # 应用已保存的防捕获设置（独立 Overlay：录屏/直播软件不可见）。
+        # 与 allow_obs_capture 互斥，二选一：obs 优先级高（防捕获是显式关闭动作）
+        if self.settings.get_setting('allow_obs_capture', False):
+            self._lyric_window.set_obs_capture_allowed(True)
+        elif self.settings.get_setting('exclude_from_capture', False):
             self.set_exclude_from_capture(True)
     
     # ---- 业务方法（UI 层调用这些方法触发业务逻辑） ----
@@ -570,6 +573,15 @@ class AppController(QObject):
         if not self._lyric_window.set_exclude_from_capture(enabled):
             # 旧版 Windows 不支持 WDA_EXCLUDEFROMCAPTURE，提示用户
             self.status_changed.emit("状态：防捕获开启失败（需要 Win10 2004+）")
+
+    def set_obs_capture_allowed(self, enabled: bool) -> None:
+        """设置歌词窗口允许 OBS 窗口捕获（摘除工具窗样式，OBS 可枚举）
+
+        与防捕获互斥：本开关开启前需保证防捕获已关闭。
+        """
+        self.settings.set_setting('allow_obs_capture', enabled)
+        if self._lyric_window:
+            self._lyric_window.set_obs_capture_allowed(enabled)
 
     def set_pos_x_min(self, value: int) -> None:
         """设置歌词起始 X 最小值（百分比）"""

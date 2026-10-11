@@ -9,6 +9,9 @@ from core.parser import parse_lrc
 
 logger = logging.getLogger(__name__)
 
+# 「允许 OBS 捕获」的隐藏属主窗口（惰性创建，见 _get_capture_owner_hwnd）
+_capture_owner = None
+
 # Windows 窗口防捕获（独立 Overlay）：user32.SetWindowDisplayAffinity
 # WDA_EXCLUDEFROMCAPTURE 使窗口对本机用户可见，但 DXGI 桌面复制/
 # Windows.Graphics.Capture（OBS、Discord、录屏软件等）全部跳过它。
@@ -20,15 +23,41 @@ _user32.SetWindowPos.argtypes = [
     ctypes.c_void_p, ctypes.c_int,
     ctypes.c_long, ctypes.c_long, ctypes.c_long, ctypes.c_long, ctypes.c_uint]
 _user32.SetWindowPos.restype = ctypes.c_bool
+_user32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+_user32.SetWindowLongPtrW.argtypes = [
+    ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
+_user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
 _WDA_NONE = 0x00000000
 _WDA_EXCLUDEFROMCAPTURE = 0x00000011
 _HWND_TOPMOST = -1
 # SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE：只提升 z 序，不动位置/尺寸/焦点
 _SWP_ZORDER_ONLY = 0x0001 | 0x0002 | 0x0010
+_GWL_EXSTYLE = -20
+_GWLP_HWNDPARENT = -8
+# WS_EX_TOOLWINDOW：OBS 窗口捕获枚举会跳过带此样式的窗口（工具窗/overlay），
+# 「允许 OBS 捕获」开启时需要摘掉它，让歌词窗出现在 OBS 窗口列表里
+_WS_EX_TOOLWINDOW = 0x00000080
 # 预点亮槽位渐入动画时长（秒，暗态模式）
 _SLOT_FADE_IN = 0.4
 # 预点亮亮态模式下未播放句的逐字显示间隔（毫秒/字，与播放时逐字效果一致）
 _SLOT_REVEAL_MS = 50
+
+
+def _get_capture_owner_hwnd():
+    """惰性创建并返回「允许 OBS 捕获」用的隐藏属主 HWND
+
+    属主窗口从不 show，仅作为 GWLP_HWNDPARENT 挂靠点，替代被摘除的
+    WS_EX_TOOLWINDOW：保证歌词窗不进任务栏、不出现在 Alt+Tab 列表。
+    """
+    global _capture_owner
+    if _capture_owner is None:
+        from PyQt5.QtWidgets import QWidget
+        _capture_owner = QWidget()
+        _capture_owner.setWindowTitle("")
+        _capture_owner.resize(1, 1)
+        _capture_owner.winId()  # 按需创建原生句柄，不调用 show
+    return int(_capture_owner.winId())
 
 
 class LyricWindow(QMainWindow):
@@ -97,19 +126,33 @@ class LyricWindow(QMainWindow):
         self.exclude_region = None
         # 防捕获（独立 Overlay）状态：True 时录屏/直播软件捕获不到歌词层
         self._capture_excluded = False
+        # 允许 OBS 窗口捕获：摘除 WS_EX_TOOLWINDOW 并挂隐藏属主，
+        # 让歌词窗出现在 OBS 的窗口捕获列表中（与防捕获互斥）
+        self._obs_capture_allowed = False
         # 置顶保活：Lossless Scaling 等全屏输出窗口会抢占 z 序把歌词压下去，
         # 周期性重新置顶保证歌词始终浮在插帧画面之上（不影响其捕获与插帧）
         self._topmost_timer = QTimer(self)
         self._topmost_timer.timeout.connect(self._enforce_topmost)
         self._topmost_timer.start(1000)
-
     def _enforce_topmost(self):
-        """把歌词窗重新钉回 topmost（只动 z 序，不抢焦点/位置/尺寸）"""
+        """把歌词窗重新钉回 topmost（只动 z 序，不抢焦点/位置/尺寸）
+
+        「允许 OBS 捕获」开启时顺带重申隐藏属主挂靠：Qt 的 show 流程会把
+        GWLP_HWNDPARENT 重置回 0（实测），这里做成幂等自愈，保证歌词窗
+        持续被 OBS 窗口捕获枚举到，且不进任务栏/Alt+Tab。
+        """
         try:
             hwnd = int(self.winId())
         except Exception:
             return
         _user32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_ZORDER_ONLY)
+        if self._obs_capture_allowed:
+            try:
+                if not _user32.GetWindowLongPtrW(hwnd, _GWLP_HWNDPARENT):
+                    _user32.SetWindowLongPtrW(
+                        hwnd, _GWLP_HWNDPARENT, _get_capture_owner_hwnd())
+            except Exception:
+                logger.exception("重申 OBS 捕获属主挂靠异常")
 
     def set_exclude_from_capture(self, enabled):
         """启用/停用防捕获（独立 Overlay）：开启后录屏/直播软件看不到歌词层
@@ -147,6 +190,60 @@ class LyricWindow(QMainWindow):
         super().showEvent(event)
         if self._capture_excluded:
             self._apply_display_affinity(True)
+        if self._obs_capture_allowed:
+            self._apply_obs_capture_style()
+
+    def set_obs_capture_allowed(self, enabled):
+        """启用/停用「允许 OBS 窗口捕获」
+
+        Qt.Tool 会给窗口加 WS_EX_TOOLWINDOW 扩展样式，OBS 窗口捕获枚举
+        会跳过这类窗口，导致歌词窗永远不在 OBS 的窗口列表里。开启本开关
+        后摘掉该样式，并把窗口挂到一个从不显示的隐藏属主上（替代
+        TOOLWINDOW 的不进任务栏/Alt+Tab 职责，不抢焦点行为由 Qt 侧
+        WS_EX_NOACTIVATE 等保证，不受影响）。
+        与防捕获（WDA_EXCLUDEFROMCAPTURE）天然互斥：防捕获开启时任何
+        捕获方式都看不到歌词层。
+        """
+        self._obs_capture_allowed = bool(enabled)
+        if enabled:
+            self._apply_obs_capture_style()
+        else:
+            self._restore_toolwindow_style()
+        logger.info("允许 OBS 窗口捕获已%s", "开启" if enabled else "关闭")
+
+    def _restore_toolwindow_style(self):
+        """恢复 WS_EX_TOOLWINDOW 样式并解除属主挂靠（关闭 OBS 窗口捕获）
+
+        与 _apply_obs_capture_style 对称：直接写回样式位。不能用
+        setWindowFlags(self.windowFlags()) 恢复——Qt 对未变化的 flags
+        是 no-op，不会重写扩展样式。
+        """
+        try:
+            hwnd = int(self.winId())
+            exstyle = _user32.GetWindowLongPtrW(hwnd, _GWL_EXSTYLE)
+            if not exstyle & _WS_EX_TOOLWINDOW:
+                _user32.SetWindowLongPtrW(
+                    hwnd, _GWL_EXSTYLE, exstyle | _WS_EX_TOOLWINDOW)
+            _user32.SetWindowLongPtrW(hwnd, _GWLP_HWNDPARENT, 0)
+        except Exception:
+            logger.exception("恢复工具窗样式异常")
+
+    def _apply_obs_capture_style(self):
+        """对原生窗口摘除 WS_EX_TOOLWINDOW 并挂隐藏属主（OBS 可枚举）"""
+        try:
+            hwnd = int(self.winId())
+            exstyle = _user32.GetWindowLongPtrW(hwnd, _GWL_EXSTYLE)
+            if exstyle & _WS_EX_TOOLWINDOW:
+                _user32.SetWindowLongPtrW(
+                    hwnd, _GWL_EXSTYLE, exstyle & ~_WS_EX_TOOLWINDOW)
+            # 挂到模块级隐藏属主上：替代 TOOLWINDOW 的「不进任务栏 /
+            # Alt+Tab」职责。属主从不显示，仅提供 HWND；Qt 的 show 流程
+            # 会把 GWLP_HWNDPARENT 重置回 0（实测），属主挂靠由
+            # _enforce_topmost 每秒幂等重申。
+            _user32.SetWindowLongPtrW(
+                hwnd, _GWLP_HWNDPARENT, _get_capture_owner_hwnd())
+        except Exception:
+            logger.exception("应用 OBS 窗口捕获样式异常")
 
     def _text_width(self, s):
         """精确测量一行文本的渲染宽度
