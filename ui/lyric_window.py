@@ -473,17 +473,16 @@ class LyricWindow(QMainWindow):
                 return True
         return False
 
-    def place_randomly(self):
-        c = self._compute_place_constraints()
-        sw = c['sw']
-        sh = c['sh']
+    def _x_y_range(self, rows, c):
+        """给定折行的锚点采样范围（用户百分比区∩安全边距，禁区模式忽略前者）
 
-        # 计算最宽行的宽度（逐字符测量，与 wrap_text 一致）
-        max_line_width = max((self._text_width(line) for line in self.wrapped_lines), default=0)
-
-        text_width = max_line_width
-        total_height = len(self.wrapped_lines) * c['text_height'] + \
-                       max(0, len(self.wrapped_lines) - 1) * c['line_spacing']
+        与 place_randomly 原范围计算同一套公式，抽出成按折行参数化的
+        版本：折行重排后块宽高变化，必须按新形状重算范围。
+        """
+        sw, sh = c['sw'], c['sh']
+        text_width = max((self._text_width(r) for r in rows), default=0)
+        total_height = len(rows) * c['text_height'] + \
+                       max(0, len(rows) - 1) * c['line_spacing']
 
         # 计算旋转后的包围盒宽度
         rotated_w = text_width * c['cos_a'] + total_height * c['sin_a']
@@ -514,94 +513,201 @@ class LyricWindow(QMainWindow):
         if y_max <= y_min:
             y_min = top_margin + c['persp_extra_y']
             y_max = max(y_min + 1, sh - bottom_margin - c['persp_extra_y'])
+        return x_min, x_max, y_min, y_max
+
+    def place_randomly(self):
+        c = self._compute_place_constraints()
+
+        x_min, x_max, y_min, y_max = self._x_y_range(self.wrapped_lines, c)
 
         # self.x 是文本左边缘，self.y 是文本基线位置
         # 整块避开禁区：先定角度再算包围盒，锚点落在安全子矩形内；
         # 随机角度放不下整块时降级试更小的角度（包围盒更窄），
+        # 全部角度都切不出安全带时按宽度阶梯重排折行再试
+        # （折更宽→块更矮适配上下带，折更窄→块更瘦适配左右带），
         # 尽可能保证整块不进禁区，全部失败才走兜底。
         # 放置时同时检查与预览槽位的碰撞，避免当前句盖住跟读暗态句。
         if self.exclude_region is not None:
-            candidates = [random.randint(self.angle_min, self.angle_max)]
-            candidates += [a for a in (0, 1, -1, 2, -2, 3, -3)
-                           if self.angle_min <= a <= self.angle_max and a not in candidates]
-            placed = False
-            fallback = None
-            for ang in candidates:
-                safe = self._region_exclusion_rects(
-                    x_min, x_max, y_min, y_max, self.wrapped_lines, ang, c)
-                if not safe:
-                    continue
-                for band in safe:
-                    rx0, ry0, rx1, ry1 = band
-                    if rx1 <= rx0 or ry1 <= ry0:
-                        continue
-                    if rx1 == rx0 and ry1 == ry0:
-                        # 单点带：直接落该点
-                        if fallback is None:
-                            fallback = (rx0, ry0, ang)
-                        aabb = self._rotated_aabb(rx0, ry0, self.wrapped_lines, ang)
-                        if not self._collides_with_preview_slots(aabb):
-                            self.angle = ang; self.x = rx0; self.y = ry0
-                            placed = True; break
-                        continue
-                    for _ in range(12):
-                        x = random.randint(rx0, rx1)
-                        y = random.randint(ry0, ry1)
-                        if fallback is None:
-                            fallback = (x, y, ang)
-                        aabb = self._rotated_aabb(x, y, self.wrapped_lines, ang)
-                        if not self._collides_with_preview_slots(aabb):
-                            self.angle = ang; self.x = x; self.y = y
-                            placed = True; break
+            result = None
+            placed, is_fb, px, py, pang = self._place_in_bands(
+                self.wrapped_lines, c,
+                lambda ang, rr=self.wrapped_lines: self._x_y_range(rr, c),
+                self._collides_with_preview_slots)
+            if placed or is_fb:
+                result = (px, py, pang)
+            else:
+                for new_rows in self._reflow_variants(self.wrapped_lines, self.full_text):
+                    placed, is_fb, px, py, pang = self._place_in_bands(
+                        new_rows, c,
+                        lambda ang, rr=new_rows: self._x_y_range(rr, c),
+                        self._collides_with_preview_slots)
                     if placed:
+                        self.wrapped_lines = new_rows
+                        self.init_char_shakes()
+                        result = (px, py, pang)
                         break
-                if placed:
-                    break
-            if not placed:
-                if fallback is not None:
-                    self.angle = fallback[2]; self.x = fallback[0]; self.y = fallback[1]
-                else:
-                    self._fallback_place(x_min, x_max, y_min, y_max)
+            if result is not None:
+                self.angle = result[2]; self.x = result[0]; self.y = result[1]
+            else:
+                self._fallback_place(x_min, x_max, y_min, y_max)
         else:
-            self.angle = random.randint(self.angle_min, self.angle_max)
-            placed = False
-            for _ in range(40):
-                x = random.randint(x_min, x_max)
-                y = random.randint(y_min, y_max)
-                aabb = self._rotated_aabb(x, y, self.wrapped_lines, self.angle)
-                if not self._collides_with_preview_slots(aabb):
-                    self.x = x; self.y = y
-                    placed = True; break
-            if not placed:
-                self.x = random.randint(x_min, x_max)
-                self.y = random.randint(y_min, y_max)
+            placed, is_fb, px, py, pang = self._place_free(
+                self.wrapped_lines,
+                lambda ang: self._x_y_range(self.wrapped_lines, c),
+                self._collides_with_preview_slots)
+            self.angle = pang; self.x = px; self.y = py
         self.compute_perspective()
 
+    def _place_free(self, rows, range_fn, collides_fn):
+        """无禁区时的随机放置，返回 (placed, is_fallback, x, y, angle)
+
+        range_fn(angle) 提供采样范围（通常与角度无关）；40 次尝试
+        找不到不重叠的点则随机落点兜底（is_fallback=True）。
+        """
+        angle = random.randint(self.angle_min, self.angle_max)
+        x_min, x_max, y_min, y_max = range_fn(angle)
+        for _ in range(40):
+            x = random.randint(x_min, x_max)
+            y = random.randint(y_min, y_max)
+            if not collides_fn(self._rotated_aabb(x, y, rows, angle)):
+                return True, False, x, y, angle
+        return (False, True, random.randint(x_min, x_max),
+                random.randint(y_min, y_max), angle)
+
+    def _place_in_bands(self, rows, c, range_fn, collides_fn):
+        """在禁区安全带内为给定折行放置，返回 (placed, is_fallback, x, y, angle)
+
+        range_fn(angle) 返回该折行形状下的锚点采样范围；collides_fn(aabb)
+        判定与现有块的碰撞（当前句查槽位、槽位查当前句+其他槽位）。
+        随机角度切不出安全带时降级试更小角度（包围盒更窄）。
+        is_fallback=True 表示该点在带内但与他块重叠（屏幕拥挤兜底）。
+        """
+        candidates = [random.randint(self.angle_min, self.angle_max)]
+        candidates += [a for a in (0, 1, -1, 2, -2, 3, -3)
+                       if self.angle_min <= a <= self.angle_max and a not in candidates]
+        fallback = None
+        for ang in candidates:
+            x_min, x_max, y_min, y_max = range_fn(ang)
+            safe = self._region_exclusion_rects(
+                x_min, x_max, y_min, y_max, rows, ang, c)
+            if not safe:
+                continue
+            # 加权随机打乱带的尝试顺序（面积越大权重越高）：固定按面积
+            # 降序会让歌词长期扎堆在最大的一侧（如禁区偏一侧时的左带），
+            # 打乱后各侧按面积比例都有机会，视觉分布更自然
+            keys = [random.random() ** (1.0 / max((b[2] - b[0]) * (b[3] - b[1]), 1))
+                    for b in safe]
+            safe = [b for _, b in sorted(zip(keys, safe), reverse=True)]
+            for band in safe:
+                rx0, ry0, rx1, ry1 = band
+                if rx1 <= rx0 or ry1 <= ry0:
+                    continue
+                if rx1 == rx0 and ry1 == ry0:
+                    # 单点带：直接落该点
+                    if fallback is None:
+                        fallback = (rx0, ry0, ang)
+                    if not collides_fn(self._rotated_aabb(rx0, ry0, rows, ang)):
+                        return True, False, rx0, ry0, ang
+                    continue
+                for _ in range(12):
+                    x = random.randint(rx0, rx1)
+                    y = random.randint(ry0, ry1)
+                    if fallback is None:
+                        fallback = (x, y, ang)
+                    if not collides_fn(self._rotated_aabb(x, y, rows, ang)):
+                        return True, False, x, y, ang
+        if fallback is not None:
+            return False, True, fallback[0], fallback[1], fallback[2]
+        return (False, False, 0, 0, 0)
+
+    def _reflow_variants(self, rows, full_text):
+        """按行数阶梯生成折行变体：更宽（块更矮，适配上下薄带）与更窄（块更瘦）
+
+        更宽：2 行合 1 → 直至单行；更窄：折行宽度每次 ÷1.5，行数增多，
+        到最小宽度止。只产折行结果，不改变 full_text。空段不产出。
+        """
+        max_w = self._get_max_text_width()
+        seen = {tuple(rows)}
+
+        # 折更宽：行数 -1 递减，直到单行
+        n = len(rows)
+        while n >= 2:
+            n -= 1
+            vr = self._wrap_to_at_most(n, full_text, max_w)
+            key = tuple(vr)
+            if vr and key not in seen:
+                seen.add(key)
+                yield vr
+
+        # 折更窄：宽度阶梯 ÷1.5
+        w = max_w
+        min_w = 160
+        while w > min_w:
+            w = int(w / 1.5)
+            vr = self.wrap_text(full_text, w)
+            key = tuple(vr)
+            if vr and key not in seen:
+                seen.add(key)
+                yield vr
+
+    def _wrap_to_at_most(self, n, text, max_w):
+        """把 text 折成至多 n 行（放宽宽度上限，可能仍超 n 行则截断返回）
+
+        实现为折行宽度阶梯放宽（×1.5）直到行数 <= n 或宽度达 max_w×3；
+        超行时按原行数结构截断，超出的行并入末行（可能超宽，由调用方
+        范围计算与 _place_in_bands 判定能否放下）。
+        """
+        if n < 1:
+            n = 1
+        w = max_w
+        rows = self.wrap_text(text, w)
+        tries = 0
+        while len(rows) > n and tries < 6:
+            w = int(w * 1.5)
+            rows = doc = self.wrap_text(text, w)
+            tries += 1
+        if len(rows) > n:
+            # 仍超 n 行：前 n-1 行保持，剩余并入末行
+            rows = rows[:n - 1] + [''.join(rows[n - 1:])]
+        return rows
     def _fallback_place(self, x_min, x_max, y_min, y_max):
-        """禁区几乎占满可放区时的兜底：按中点向禁区外围找最近可放点"""
+        """禁区几乎占满可放区时的兜底：AABB 压禁区时按最小移动量推到最近安全带
+
+        锚点语义与放置一致（x=文本左边缘，y=首行基线，文本向右向下生长），
+        直接复用 _region_exclusion_rects 的四侧公式反向定位；候选夹回
+        范围后再验证一次，四侧都无解则维持原位（极端退化，允许压禁区）。
+        """
         r = self.exclude_region
         self.angle = random.randint(self.angle_min, self.angle_max)
         self.x = (x_min + x_max) // 2
         self.y = (y_min + y_max) // 2
-        # 若起点仍落在禁区内，沿最近方向推出禁区
-        if r and r.contains(self.x, self.y):
-            dist_left = self.x - r.x()
-            dist_right = r.x() + r.width() - self.x
-            dist_top = self.y - r.y()
-            dist_bottom = r.y() + r.height() - self.y
-            edge = min(dist_left, dist_right, dist_top, dist_bottom,
-                       key=lambda d: d)
-            if edge == dist_left:
-                self.x = r.x()
-            elif edge == dist_right:
-                self.x = r.x() + r.width()
-            elif edge == dist_top:
-                self.y = r.y()
-            else:
-                self.y = r.y() + r.height()
-            # 推出后若落在候选范围外，夹回范围（尽量靠近禁区边缘）
-            self.x = max(x_min, min(x_max, self.x))
-            self.y = max(y_min, min(y_max, self.y))
+        if not r or not self.wrapped_lines:
+            return
+        c = self._compute_place_constraints()
+        rot_w, rot_h = self._rotated_size(self.wrapped_lines, self.angle, c)
+        pad = c['glow_margin'] + c['shadow_margin']
+        th = c['text_height']
+
+        def _hits(x, y):
+            return self._rects_overlap(
+                self._rotated_aabb(x, y, self.wrapped_lines, self.angle),
+                (r.x(), r.y(), r.width(), r.height()))
+
+        if not _hits(self.x, self.y):
+            return
+        ry1, rx1 = r.y() + r.height(), r.x() + r.width()
+        # 四侧安全带（与 _region_exclusion_rects 同一几何），先夹回候选范围
+        cands = [
+            (self.x, max(y_min, min(y_max, int(r.y() - 1 - (rot_h - th - pad))))),  # 推到禁区上方
+            (self.x, max(y_min, min(y_max, int(math.ceil(ry1 + 1 + th + pad))))),   # 推到禁区下方
+            (max(x_min, min(x_max, int(r.x() - 1 - (rot_w - pad)))), self.y),       # 推到禁区左侧
+            (max(x_min, min(x_max, int(math.ceil(rx1 + 1 + pad)))), self.y),        # 推到禁区右侧
+        ]
+        valid = [(abs(x - self.x) + abs(y - self.y), x, y)
+                 for x, y in cands if not _hits(x, y)]
+        if valid:
+            valid.sort()
+            self.x, self.y = valid[0][1], valid[0][2]
 
     # ---- 跟读预点亮：暗态槽位的左右分区放置与碰撞规避 ----
 
@@ -640,7 +746,8 @@ class LyricWindow(QMainWindow):
         保证任何句子都能生成槽位；碰撞多次失败才允许少量重叠（视觉上
         优于整句消失）。有禁区时：采样范围用 _region_exclusion_rects
         切出的安全带（锚点整块 AABB 不进禁区），随机角度放不下时降级
-        试更小角度；仍无解才退回全范围（可能侵入禁区，属极端退化）。
+        试更小角度；所有角度都切不出安全带时按宽度阶梯重排折行再试，
+        仍无解才退回全范围（可能侵入禁区，属极端退化）。
         """
         rows = self.wrap_text(self.lyric_timeline[idx][1], self._get_max_text_width())
         if not rows:
@@ -652,8 +759,9 @@ class LyricWindow(QMainWindow):
         base = int(c['base_margin'])
         region_active = self.exclude_region is not None
 
-        def _base_range(angle):
-            rot_w, rot_h = self._rotated_size(rows, angle, c)
+        def _base_range(angle, rr=None):
+            rr = rows if rr is None else rr
+            rot_w, rot_h = self._rotated_size(rr, angle, c)
             # 禁区开启时忽略位置范围，改用全屏可用区
             if region_active:
                 x_min = base + c['persp_extra_x']
@@ -672,49 +780,45 @@ class LyricWindow(QMainWindow):
                 y_min = y_max = max(int(th), int((sh - rot_h - th) / 2))
             return x_min, x_max, y_min, y_max
 
-        angles = [random.randint(self.angle_min, self.angle_max)]
-        angles += [a for a in (0, 1, -1, 2, -2, 3, -3)
-                   if self.angle_min <= a <= self.angle_max and a not in angles]
+        # 放置判定：与当前句及已有暗态槽位都不重叠
+        def _slot_free(aabb):
+            return not self._slot_collides(aabb)
 
         # ---- 主阶段：优先放安全带内且不与其他块重叠的点 ----
         # fallback 记录每个角度/带第一个候选，全部失败时用它兜底
         # （允许少量重叠，保证句子不消失）
-        fallback = None
-        for angle in angles:
-            x_min, x_max, y_min, y_max = _base_range(angle)
-            bands = None
-            if region_active:
-                bands = self._region_exclusion_rects(
-                    x_min, x_max, y_min, y_max, rows, angle, c)
-                if not bands:
-                    continue  # 该角度无安全带，降级试下一角度
-            for band in bands or [(x_min, y_min, x_max, y_max)]:
-                bx0, by0, bx1, by1 = band
-                if bx1 < bx0 or by1 < by0:
-                    continue  # 空带（坐标取整产生）
-                if bx1 == bx0 and by1 == by0:
-                    # 单点带（居中放宽兜底）：直接落该点（仍查一次重叠）
-                    if fallback is None:
-                        fallback = (bx0, by0, angle)
-                    if not self._slot_collides(self._rotated_aabb(bx0, by0, rows, angle)):
-                        self._add_preview_slot(idx, rows, bx0, by0, angle)
-                        return
-                    continue
-                # 宽带：随机尝试（有禁区时带较窄试 12 次即可，无禁区对齐原 40 次）
-                tries = 12 if region_active else 40
-                for _ in range(tries):
-                    x = random.randint(bx0, bx1)
-                    y = random.randint(by0, by1)
-                    if fallback is None:
-                        fallback = (x, y, angle)
-                    aabb = self._rotated_aabb(x, y, rows, angle)
-                    if not self._slot_collides(aabb):
-                        self._add_preview_slot(idx, rows, x, y, angle)
-                        return
-        if fallback is not None:
-            # 全部尝试失败（屏幕拥挤）：用首个候选兜底（少量重叠）
-            self._add_preview_slot(idx, rows, fallback[0], fallback[1], fallback[2])
+        chosen_rows = rows
+        if not region_active:
+            placed, is_fb, px, py, pang = self._place_free(
+                rows, _base_range, _slot_free)
+        else:
+            placed, is_fb, px, py, pang = self._place_in_bands(
+                rows, c,
+                lambda ang, rr=rows: _base_range(ang, rr),
+                _slot_free)
+            if not placed and not is_fb:
+                # 所有角度都切不出安全带：按宽度阶梯重排折行再试
+                # （折更宽→块更矮适配上下带，折更窄→块更瘦适配左右带）
+                for new_rows in self._reflow_variants(rows, self.lyric_timeline[idx][1]):
+                    placed, is_fb, px, py, pang = self._place_in_bands(
+                        new_rows, c,
+                        lambda ang, rr=new_rows: _base_range(ang, rr),
+                        _slot_free)
+                    if placed:
+                        chosen_rows = new_rows
+                        break
+        if placed:
+            self._add_preview_slot(idx, chosen_rows, px, py, pang)
             return
+        if is_fb:
+            # 全部尝试失败（屏幕拥挤）：用首个候选兜底（少量重叠）
+            self._add_preview_slot(idx, chosen_rows, px, py, pang)
+            return
+        # 所有角度/折行变体都切不出安全带（大禁区+长句盖满采样范围）的
+        # 极端退化：退回全范围随机放置（可能侵入禁区），保证句子不消失
+        x_min, x_max, y_min, y_max = _base_range(self.angle_min)
+        self._add_preview_slot(idx, rows, random.randint(x_min, x_max),
+                               random.randint(y_min, y_max), self.angle_min)
 
     def _add_preview_slot(self, idx, rows, x, y, angle):
         self.preview_slots.append({
@@ -742,6 +846,16 @@ class LyricWindow(QMainWindow):
             self._ensure_preview_slots(idx)
         else:
             self.preview_slots = []
+        self.update()
+
+    def refresh_exclude_layout(self):
+        """禁区变化（设置/清除）后播放中立即生效：当前句按新禁区重排，后续句重生成"""
+        if self.full_text and self.wrapped_lines and self.line_timer.isActive():
+            self.place_randomly()
+        # 清空重生成：旧槽位是按旧禁区（或无禁区）摆的，直接保留会继续压禁区
+        self.preview_slots = []
+        idx = max(0, self.current_line - 1) if self.lyric_timeline else 0
+        self._ensure_preview_slots(idx)
         self.update()
 
     def check_lyric_time(self):
