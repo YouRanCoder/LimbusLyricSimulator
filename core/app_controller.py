@@ -600,6 +600,8 @@ class AppController(QObject):
         """设置歌词禁止区域（像素坐标，None 表示清除）"""
         if self._lyric_window:
             self._lyric_window.exclude_region = region
+            # 播放中立即生效：当前句重排位置（新禁区或清禁区），后续句重生成
+            self._lyric_window.refresh_exclude_layout()
         self.settings.set_setting('exclude_region',
                                   {'x': region.x(), 'y': region.y(),
                                    'w': region.width(), 'h': region.height()}
