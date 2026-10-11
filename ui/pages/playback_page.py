@@ -118,6 +118,13 @@ class PlaybackPage:
             checked=False)
         action_group.addSettingCard(exclude_capture_card)
 
+        obs_capture_card, self.obs_capture_check = switch_card(
+            FluentIcon.VIEW, "允许 OBS 窗口捕获",
+            "让歌词悬浮窗出现在 OBS「窗口捕获」列表中，可单独捕获并保留透明背景；"
+            "与防捕获模式互斥，开启时自动关闭防捕获",
+            checked=False)
+        action_group.addSettingCard(obs_capture_card)
+
         self.vbox.addWidget(player_group)
         self.vbox.addWidget(lyric_card)
         self.vbox.addWidget(action_group)

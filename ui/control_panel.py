@@ -131,6 +131,11 @@ class ControlPanel(FluentWindow):
                 p.close_behavior_combo.setCurrentIndex(close_idx)
             p.netease_adapter_check.setChecked(settings.get_setting('netease_adapter_enabled', True))
             p.exclude_capture_check.setChecked(settings.get_setting('exclude_from_capture', False))
+            p.obs_capture_check.setChecked(settings.get_setting('allow_obs_capture', False))
+            # 两者互斥，允许 OBS 捕获优先（与 set_ui 的启动应用逻辑一致）：
+            # 配置被手动改成同时为真时，UI 上按 obs 优先显示
+            if p.obs_capture_check.isChecked() and p.exclude_capture_check.isChecked():
+                p.exclude_capture_check.setChecked(False)
             p.filter_pure_music_check.setChecked(settings.get_setting('filter_pure_music', True))
             p.filter_credits_check.setChecked(settings.get_setting('filter_credits', True))
             self.inst_patterns = settings.get_setting('inst_patterns', None)
@@ -187,6 +192,7 @@ class ControlPanel(FluentWindow):
             'close_behavior': p.close_behavior_combo.currentData(),
             'netease_adapter_enabled': p.netease_adapter_check.isChecked(),
             'exclude_from_capture': p.exclude_capture_check.isChecked(),
+            'allow_obs_capture': p.obs_capture_check.isChecked(),
             'filter_pure_music': p.filter_pure_music_check.isChecked(),
             'filter_credits': p.filter_credits_check.isChecked(),
             'mode': a.mode_combo.currentData(),
@@ -265,9 +271,15 @@ class ControlPanel(FluentWindow):
         # 网易云适配方式
         p.netease_adapter_check.checkedChanged.connect(self._on_netease_adapter_changed)
 
-        # 防捕获模式（独立 Overlay）：切换时立即套用到歌词窗口
+        # 防捕获模式（独立 Overlay）：切换时立即套用到歌词窗口；
+        # 与「允许 OBS 窗口捕获」互斥（防捕获开启 = 一切捕获不可见）
         p.exclude_capture_check.checkedChanged.connect(
-            self.controller.set_exclude_from_capture)
+            self._on_exclude_capture_changed)
+
+        # 允许 OBS 窗口捕获：摘除工具窗样式让 OBS 枚举到歌词窗；
+        # 与防捕获互斥（本开关开启 = 自动关闭防捕获）
+        p.obs_capture_check.checkedChanged.connect(
+            self._on_obs_capture_changed)
 
         # 编曲作词过滤开关：切换时保存并更新已获取歌词的显示
         p.filter_credits_check.checkedChanged.connect(self._on_filter_credits_changed)
@@ -750,6 +762,32 @@ class ControlPanel(FluentWindow):
         p.autostart_check.setChecked(not enabled)
         p.autostart_check.blockSignals(False)
         warn(self, "开机自启动", "设置开机自启动失败，请稍后重试")
+
+    def _on_exclude_capture_changed(self, enabled: bool) -> None:
+        """防捕获开关：套用到歌词窗口；开启时联动关闭「允许 OBS 窗口捕获」
+
+        防捕获（WDA_EXCLUDEFROMCAPTURE）下任何捕获方式都看不到歌词层，
+        与 OBS 窗口捕获天然互斥。
+        """
+        p = self._playback
+        if enabled and p.obs_capture_check.isChecked():
+            # blockSignals 防递归触发 _on_obs_capture_changed
+            p.obs_capture_check.blockSignals(True)
+            p.obs_capture_check.setChecked(False)
+            p.obs_capture_check.blockSignals(False)
+            self.controller.set_obs_capture_allowed(False)
+        self.controller.set_exclude_from_capture(enabled)
+
+    def _on_obs_capture_changed(self, enabled: bool) -> None:
+        """允许 OBS 窗口捕获开关：套用到歌词窗口；开启时联动关闭防捕获"""
+        p = self._playback
+        if enabled and p.exclude_capture_check.isChecked():
+            # blockSignals 防递归触发 _on_exclude_capture_changed
+            p.exclude_capture_check.blockSignals(True)
+            p.exclude_capture_check.setChecked(False)
+            p.exclude_capture_check.blockSignals(False)
+            self.controller.set_exclude_from_capture(False)
+        self.controller.set_obs_capture_allowed(enabled)
 
     # ---- 系统托盘 ----
 
