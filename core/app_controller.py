@@ -132,9 +132,12 @@ class AppController(QObject):
         self._progress_timer.setInterval(200)
         self._progress_timer.timeout.connect(self._sync_playback_progress)
 
-        # 歌词获取互斥守卫：防止重复点击/多路触发并发执行 fetch_lyric，
-        # 避免 qasync 事件循环出现 "Cannot enter into task while another task is being executed" 卡死
-        self._fetch_in_progress = False
+        # 歌词获取串行锁：防止重复点击/多路触发并发执行 fetch_lyric，
+        # 避免 qasync 事件循环出现 "Cannot enter into task while another task is being executed" 卡死。
+        # 用锁排队而不是布尔丢弃：切歌时若上一首的获取尚未结束，直接丢弃本次请求会让
+        # 新歌永远没有歌词（用户只能手动点"开始播放"恢复）；排队执行时后一个请求
+        # 会重新读取当前播放信息，因此拿到的总是最新歌曲的歌词。
+        self._lyric_fetch_lock = asyncio.Lock()
     
     def set_ui(self, control_panel, lyric_window) -> None:
         """
@@ -223,14 +226,11 @@ class AppController(QObject):
         Returns:
             bool: 是否成功获取歌词（供切歌自动播放时判断是否继续）
         """
-        # 互斥守卫：上一次获取尚未完成时忽略本次请求，
+        # 歌词获取串行锁：上一次获取尚未完成时排队等待，而不是直接丢弃，
         # 防止多个 fetch_lyric 协程并发执行导致 qasync 事件循环崩溃
-        if self._fetch_in_progress:
-            logger.warning("歌词获取正在进行中，忽略重复请求")
-            return False
-
-        self._fetch_in_progress = True
-        try:
+        # （"Cannot enter into task while another task is being executed"）。
+        # 排队者拿到锁后会重新读取当前播放信息，所以总能拿到最新歌曲的歌词。
+        async with self._lyric_fetch_lock:
             self.status_changed.emit("状态：正在获取当前播放...")
 
             if not self.lyric_service:
@@ -249,7 +249,8 @@ class AppController(QObject):
 
             if result.success:
                 lyric = self.filter_credit_lines(result.lyric)
-                logger.info("歌词获取成功：%s - %s，时长 %dms", result.song, result.artist, result.duration_ms)
+                logger.info("歌词获取成功：%s - %s，时长 %dms",
+                            result.song, result.artist, result.duration_ms)
                 self.lyric_fetched.emit(lyric, result.duration_ms, result.song, result.artist)
                 # 双语模式拿到原文但没有翻译时已自动回退到单语，状态栏明示
                 if result.fell_back_from_bilingual:
@@ -259,17 +260,14 @@ class AppController(QObject):
                 else:
                     self.status_changed.emit(f"状态：已获取「{result.song}」的歌词")
                 return True
+            if not result.song and not result.artist:
+                logger.info("歌词获取已取消")
+                self.status_changed.emit("状态：已取消")
             else:
-                if not result.song and not result.artist:
-                    logger.info("歌词获取已取消")
-                    self.status_changed.emit("状态：已取消")
-                else:
-                    logger.warning("未找到歌词：%s - %s（可能为纯音乐）", result.song, result.artist)
-                    self.lyric_fetch_failed.emit("未找到歌词，请尝试换源")
-                    self.status_changed.emit("状态：未找到歌词，请尝试换源")
-                return False
-        finally:
-            self._fetch_in_progress = False
+                logger.warning("未找到歌词：%s - %s（可能为纯音乐）", result.song, result.artist)
+                self.lyric_fetch_failed.emit("未找到歌词，请尝试换源")
+                self.status_changed.emit("状态：未找到歌词，请尝试换源")
+            return False
     
     @qasync.asyncSlot()
     async def list_smtc_sessions(self) -> list:

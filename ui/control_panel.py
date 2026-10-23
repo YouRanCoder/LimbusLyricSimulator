@@ -459,7 +459,17 @@ class ControlPanel(FluentWindow):
 
     async def _fetch_and_restart(self, manual_input) -> None:
         """获取歌词并自动重新开始歌词表演（切歌/切源/仅翻译切换共用）"""
+        before = self.controller.get_current_media()
         result = await self._fetch_lyric_to_box(manual_input)
+        # 获取期间又切了歌：本次拿到的是上一首的歌词，交给后一个请求处理，
+        # 否则会把旧歌词短暂抢着播出来
+        after = self.controller.get_current_media()
+        if (before.song, before.artist) != (after.song, after.artist):
+            logger.info(
+                "获取期间已切歌（%s - %s → %s - %s），放弃本次歌词表演",
+                before.song, before.artist, after.song, after.artist,
+            )
+            return
         if result == 'ok':
             # 获取到歌词：先停止上一首再自动播放
             self._on_stop()
