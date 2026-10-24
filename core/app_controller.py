@@ -138,6 +138,9 @@ class AppController(QObject):
         # 新歌永远没有歌词（用户只能手动点"开始播放"恢复）；排队执行时后一个请求
         # 会重新读取当前播放信息，因此拿到的总是最新歌曲的歌词。
         self._lyric_fetch_lock = asyncio.Lock()
+
+        # 暂停时隐藏歌词（从配置加载，set_ui 时应用）
+        self._hide_lyric_on_pause: bool = False
     
     def set_ui(self, control_panel, lyric_window) -> None:
         """
@@ -165,6 +168,9 @@ class AppController(QObject):
         # 应用已保存的"未播放歌词保持暗态"（False=亮态常驻，唱完正常淡出）
         self._lyric_window.preview_keep_dim = bool(
             self.settings.get_setting('preview_keep_dim', True))
+        # 应用已保存的"暂停时隐藏歌词"
+        self._hide_lyric_on_pause = bool(
+            self.settings.get_setting('hide_lyric_on_pause', False))
 
         # 应用已保存的防捕获设置（独立 Overlay：录屏/直播软件不可见）。
         # 与 allow_obs_capture 互斥，二选一：obs 优先级高（防捕获是显式关闭动作）
@@ -537,18 +543,34 @@ class AppController(QObject):
             logger.debug("读取播放器进度失败", exc_info=True)
 
     def pause_playback(self) -> None:
-        """暂停歌词播放：定格当前画面，不销毁歌词窗口"""
+        """暂停歌词播放：定格当前画面，不销毁歌词窗口
+
+        若开启「暂停时隐藏歌词」，则连同画面一起清空（状态保留）。
+        """
         if self._lyric_window:
             logger.info("暂停歌词播放")
             self._lyric_window.pause_lyric()
-            self.status_changed.emit("状态：已暂停")
+            if self._hide_lyric_on_pause and self._lyric_window.hide_content_on_pause():
+                self.status_changed.emit("状态：已暂停（歌词已隐藏）")
+            else:
+                self.status_changed.emit("状态：已暂停")
 
     def resume_playback(self) -> None:
         """恢复歌词播放：从暂停位置继续"""
         if self._lyric_window:
             logger.info("恢复歌词播放")
+            self._lyric_window.show_content_on_resume()
             self._lyric_window.resume_lyric()
             self.status_changed.emit("状态：已恢复")
+
+    def set_hide_lyric_on_pause(self, enabled: bool) -> None:
+        """设置「暂停时隐藏歌词」开关（立即持久化并生效）"""
+        logger.info("暂停时隐藏歌词：%s", "开启" if enabled else "关闭")
+        self._hide_lyric_on_pause = bool(enabled)
+        self.settings.set_setting('hide_lyric_on_pause', self._hide_lyric_on_pause)
+        if not self._hide_lyric_on_pause and self._lyric_window:
+            # 关闭开关时立即恢复显示，避免停在「隐藏」状态无法感知
+            self._lyric_window.show_content_on_resume()
     
     def set_perspective_enabled(self, enabled: bool) -> None:
         """设置 3D 透视开关"""

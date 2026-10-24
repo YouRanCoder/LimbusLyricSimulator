@@ -105,6 +105,9 @@ class LyricWindow(QMainWindow):
         self.line_timer = QTimer(self); self.line_timer.timeout.connect(self.check_lyric_time)
         self.start_time = 0; self.char_shakes = []
         self._paused_at = None; self._pause_requested = False
+        # 暂停时隐藏歌词内容（开关开启时由控制面板调用 hide_content_on_pause）：
+        # 只清空画面、保留全部播放状态，恢复播放后从暂停位置继续
+        self._hidden_on_pause = False
         self.fading_lines = []
         self.fade_timer = QTimer(self); self.fade_timer.timeout.connect(self.update_fading)
         self.fade_timer.start(30)
@@ -430,6 +433,8 @@ class LyricWindow(QMainWindow):
                         angle_min, angle_max, margin_time, max_interval, max_duration,
                         mode, spacing, shake_intensity, shake_speed,
                         fade_speed, rise_speed, glow, glow_color, glow_size, glow_alpha):
+        # 重新开始演出时清掉「暂停隐藏」状态，避免新歌词仍不显示
+        self._hidden_on_pause = False
         self.font = font; self.text_color = color; self.stroke_color = stroke_color
         self.stroke_width = stroke_width; self.angle_min = angle_min; self.angle_max = angle_max
         self.margin_time = margin_time; self.max_interval = max_interval; self.max_duration = max_duration
@@ -1230,7 +1235,8 @@ class LyricWindow(QMainWindow):
             # 播完自停的 line_timer 在重定位后必须重新启动，
             # 否则不会推进到重定位到的行（外部进度 timer 是 200ms 一次，但
             # 当前帧不会再被消费——check_lyric_time 需要 line_timer 驱动逐行推进）
-            if not self.line_timer.isActive():
+            # 暂停隐藏期间不启动：保持画面无内容，等恢复播放时统一重启
+            if not self.line_timer.isActive() and not self._hidden_on_pause:
                 self.line_timer.start(50)
             return
         self.external_time = ms
@@ -1299,6 +1305,7 @@ class LyricWindow(QMainWindow):
         self.external_time = None
         self._applied_external_time = 0
         self._paused_at = None; self._pause_requested = False
+        self._hidden_on_pause = False
         self.update()
 
     def pause_lyric(self):
@@ -1316,6 +1323,39 @@ class LyricWindow(QMainWindow):
             # 当前句已完整显示（或尚未开始）：立即记录暂停时刻
             self._paused_at = time.time() * 1000
 
+    def hide_content_on_pause(self):
+        """暂停时隐藏歌词内容（等价于关闭歌词显示）
+
+        只清空画面，不销毁歌词状态（时间轴、当前句、暂停时刻全部保留），
+        因此恢复播放时能从暂停位置继续演出。
+
+        返回是否真的进入了隐藏状态（当前没有歌词内容时不隐藏）。
+        """
+        if self._hidden_on_pause:
+            return True
+        if not self.full_text and not self.lyric_timeline:
+            # 没有在演出：无内容可隐藏，避免状态机被无意义地置位
+            return False
+        self._hidden_on_pause = True
+        logger.debug("暂停时隐藏歌词显示")
+        # 隐藏会立即停掉逐字定时器，因此这里必须先把暂停时刻定格，
+        # 否则 resume_lyric 无从补偿暂停时长，恢复后时间轴会瞬间前跳。
+        if self._paused_at is None:
+            self._paused_at = time.time() * 1000
+        # 隐藏期间不再空转颤动/逐字动画，减少无谓的定时器唤醒
+        self.shake_timer.stop()
+        self.char_timer.stop()
+        self.update()
+        return True
+
+    def show_content_on_resume(self):
+        """恢复播放：取消暂停隐藏，重新显示歌词内容"""
+        if not self._hidden_on_pause:
+            return
+        self._hidden_on_pause = False
+        logger.debug("恢复播放，重新显示歌词显示")
+        self.update()
+
     def resume_lyric(self):
         """恢复歌词播放：从暂停位置继续，不跳歌。"""
         logger.debug("恢复歌词播放")
@@ -1324,6 +1364,9 @@ class LyricWindow(QMainWindow):
             self.start_time += time.time() * 1000 - self._paused_at
             self._paused_at = None
         self._pause_requested = False
+        if self._hidden_on_pause:
+            # 仍处于「暂停隐藏」状态时不要重启定时器，否则歌词会在不可见期间推进
+            return
         if self.lyric_timeline:
             self.line_timer.start(50)
         if self.full_text:
@@ -1331,6 +1374,12 @@ class LyricWindow(QMainWindow):
             self.shake_timer.start(self.shake_speed)
 
     def paintEvent(self, event):
+        if self._hidden_on_pause:
+            # 暂停隐藏期间：以 Source 合成整屏刷成全透明，确保上一帧残留被清掉
+            painter = QPainter(self)
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            painter.fillRect(self.rect(), Qt.transparent)
+            return
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
         painter.setOpacity(self.opacity / 100.0)
         for f in self.fading_lines: f.draw(painter)

@@ -148,6 +148,7 @@ class ControlPanel(FluentWindow):
                 p.exclude_capture_check.setChecked(False)
             p.filter_pure_music_check.setChecked(settings.get_setting('filter_pure_music', True))
             p.filter_credits_check.setChecked(settings.get_setting('filter_credits', True))
+            p.hide_on_pause_check.setChecked(settings.get_setting('hide_lyric_on_pause', False))
             self.inst_patterns = settings.get_setting('inst_patterns', None)
             idx = a.mode_combo.findData(settings.get_setting('mode', 'auto'))
             if idx >= 0:
@@ -207,6 +208,7 @@ class ControlPanel(FluentWindow):
             'allow_obs_capture': p.obs_capture_check.isChecked(),
             'filter_pure_music': p.filter_pure_music_check.isChecked(),
             'filter_credits': p.filter_credits_check.isChecked(),
+            'hide_lyric_on_pause': p.hide_on_pause_check.isChecked(),
             'mode': a.mode_combo.currentData(),
             'font_family': a.font_combo.currentText(),
             'font_size': a.font_size.value(),
@@ -298,6 +300,10 @@ class ControlPanel(FluentWindow):
 
         # 编曲作词过滤开关：切换时保存并更新已获取歌词的显示
         p.filter_credits_check.checkedChanged.connect(self._on_filter_credits_changed)
+
+        # 暂停时隐藏歌词：切换时立即保存并生效
+        p.hide_on_pause_check.checkedChanged.connect(
+            self.controller.set_hide_lyric_on_pause)
 
         # 预设
         a.preset_combo.currentTextChanged.connect(self._on_load_preset)

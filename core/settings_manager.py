@@ -220,6 +220,8 @@ class SettingsManager:
             'filter_pure_music': True,
             'inst_patterns': list(DEFAULT_INST_PATTERNS),
             'filter_credits': True,
+            # 暂停时隐藏歌词：播放器暂停后清空歌词层，恢复播放后从暂停位置继续
+            'hide_lyric_on_pause': False,
             'credit_patterns': list(DEFAULT_CREDIT_PATTERNS),
             'perspective_enabled': True,
             'persp_x_strength': 5,

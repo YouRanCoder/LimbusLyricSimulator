@@ -53,6 +53,10 @@ class PlaybackPage:
             FluentIcon.LANGUAGE, "中英双语同时演出",
             "勾选后原始歌词与翻译歌词同时显示（需歌词源提供翻译）；开启时自动关闭跟读预点亮",
             checked=False)
+        hide_on_pause_card, self.hide_on_pause_check = switch_card(
+            FluentIcon.PAUSE, "暂停时隐藏歌词",
+            "播放器暂停时清空歌词层，恢复播放后从暂停位置继续演出（不丢进度）",
+            checked=False)
 
         player_group = SettingCardGroup("播放器", self.page)
         player_group.addSettingCard(player_card)
@@ -63,6 +67,7 @@ class PlaybackPage:
         player_group.addSettingCard(credits_card)
         player_group.addSettingCard(trans_card)
         player_group.addSettingCard(bilingual_card)
+        player_group.addSettingCard(hide_on_pause_card)
 
         # ---- 歌词输入 ----
         self.text_input = QTextEdit()

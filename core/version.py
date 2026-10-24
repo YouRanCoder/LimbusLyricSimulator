@@ -8,7 +8,7 @@
 """
 
 # 应用版本，与 git tag（去掉 v 前缀）保持一致
-APP_VERSION = "3.0.2"
+APP_VERSION = "3.1.0"
 
 # 仓库地址（更新检查 API 与 Release 页面均基于此派生）
 REPO_OWNER = "YouRanCoder"
